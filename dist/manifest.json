@@ -1,0 +1,33 @@
+{
+    "manifest_version": 3,
+    "name": "Custom-POLITE(moodle)",
+    "version": "1.0",
+    "description": "北海道情報大学のPOLITEに機能を追加",
+    "icons": {
+        "16": "icon16.png",
+        "48": "icon48.png",
+        "128": "icon128.png"
+    },
+
+    "action": {
+        "default_icon": {
+            "16": "icon16.png",
+            "48": "icon48.png"
+        },
+        "default_title": "Custom-POLITE(moodle)"
+    },
+
+    "content_scripts": [
+        {
+            "matches": ["https://polite.do-johodai.ac.jp/moodle/*"],
+            "js": ["content.js"],
+            "run_at": "document_idle"
+        }
+    ],
+    "permissions": [
+        "storage"
+    ],
+    "host_permissions": [
+        "https://polite.do-johodai.ac.jp/*"
+    ]
+}
