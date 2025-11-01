@@ -95,3 +95,5 @@ https://chromewebstore.google.com/detail/plihohicbpnimfimobapbjeebebabjja?utm_so
 ## ライセンス
 
 Copyright (c) 2025 Miaka1020. All Rights Reserved.
+
+本拡張機能のソースコードやデザインの改変、および二次配布（再配布）は固く禁止します。
