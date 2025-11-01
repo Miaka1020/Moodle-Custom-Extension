@@ -12,7 +12,7 @@
     <p align="center">
       <img src="assets/screenshot-05.gif" width="500">
       <br>
-      <em>動画背景（GIF）の設定デモ</em>
+      <em>動画背景の設定デモ</em>
     </p>
 
 * **ヘッダーのカスタマイズ**
