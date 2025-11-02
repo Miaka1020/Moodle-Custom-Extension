@@ -30,7 +30,7 @@
       <br>
       <em>カスタム時間割の表示例</em>
     </p>
-
+* **コンテンツブロックの透明度調整**
 * **課題締め切りの強調**
     <p align="center">
       <img src="assets/screenshot-02.png" width="500">
@@ -38,7 +38,13 @@
       <em>締め切りが近い課題の強調表示</em>
     </p>
 
-* **コンテンツブロックの透明度調整**
+
+* **解き直しモード**
+    <p align="center">
+      <img src="assets/screenshot-06.png" width="500">
+      <br>
+      <em>解き直しモードの表示例</em>
+    </p>
 
 ---
 
@@ -84,6 +90,8 @@ https://chromewebstore.google.com/detail/plihohicbpnimfimobapbjeebebabjja?utm_so
 ### v1.0
 * 初回リリース
 
+### v2.0
+* 解き直しモードを追加
 ---
 
 ## 開発者
