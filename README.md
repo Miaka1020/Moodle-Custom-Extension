@@ -26,7 +26,7 @@
 * **カスタム時間割**
     * ダッシュボードへのカスタム時間割ウィジェットの追加・編集
     <p align="center">
-      <img src="assets/screenshot-03.png" width="500">
+      <img src="assets/screenshot-07.png" width="500">
       <br>
       <em>カスタム時間割の表示例</em>
     </p>
