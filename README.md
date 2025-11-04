@@ -92,6 +92,11 @@ https://chromewebstore.google.com/detail/plihohicbpnimfimobapbjeebebabjja?utm_so
 
 ### v2.0
 * 解き直しモードを追加
+
+### v2.1
+* 時間割に締め切りを表示
+* ウィンドウを小さくしたときのヘッダーのuiの崩れを修正
+* 透明度調整の範囲を修正
 ---
 
 ## 開発者
