@@ -9,11 +9,11 @@
     const STORE_NAME = 'background_files';
     const DB_KEY_BG = 'current_bg';
 
-    // ストレージキー
+    /* Storage Keys */
     const SETTINGS_STORAGE_KEY = 'moodle_custom_settings_v4';
     const TIMETABLE_STORAGE_KEY = 'moodle_custom_timetable_v2';
 
-    // デフォルト設定
+    /* Defaults */
     const DEFAULT_SETTINGS = {
         headerBgColor: "#ffffff",
         headerTextColor: "#000000",
@@ -41,7 +41,7 @@
     ];
     const DAY_MAP = ["日", "月", "火", "水", "木", "金", "土"];
 
-    // セレクタ
+    /* Selectors */
     const BODY_SELECTOR = 'body#page-my-index, body#page-course-view-topics, body#page-course-view-weeks,body#page';
     const PAGE_WRAPPER_SELECTOR = '#page-wrapper';
     const DASHBOARD_REGION_SELECTOR = '#block-region-content';
@@ -56,7 +56,7 @@
     let retakeStartTime = null;
     let timelineDeadlines = []; // ★ タイムラインからパースした期限情報を保持する配列
     
-    // ★★★ カウントダウン＆ポーリング用 ★★★
+    // カウントダウン＆ポーリング用
     let countdownTimerInterval = null;
     let timelinePoller = null; 
     let pollAttempts = 0; 
@@ -83,21 +83,15 @@
         injectEditModal(timetable);
 
         // 4. 全てのスタイルと機能を適用
-        // ★ 修正: await を追加し、この処理が完了するのを待つ
         await applyAllCustomStyles(false); 
 
-        // 5. ★★★ 期限読み込みポーリングを開始 ★★★
+        // 5.  期限読み込みポーリングを開始 
         // (1回目の描画が完了した後でポーリングを開始する)
         if (document.URL.includes('/my/')) {
             startTimelinePoller();
         }
     }
 
-    // ★★★ 新しいポーリング関数 ★★★
-    /**
-     * 機能: Moodleのタイムラインが読み込まれるまで監視（ポーリング）する
-     * 読み込みが完了したら、解析と時間割の再描画をキックする
-     */
     function startTimelinePoller() {
         // 既存のポーラーがあれば停止
         if (timelinePoller) {
@@ -174,7 +168,7 @@
             const transaction = db.transaction([STORE_NAME], 'readwrite');
             const store = transaction.objectStore(STORE_NAME);
             const data = { id: DB_KEY_BG, blob: blob, type: mimeType };
-            const request = store.put(data); // 常に同じキーで上書き
+            const request = store.put(data); // 常に上書き
             request.onsuccess = () => resolve();
             request.onerror = (e) => reject(e);
         });
@@ -216,10 +210,10 @@
             settings = DEFAULT_SETTINGS;
         }
 
-        // デフォルト値とのマージ
+        // デフォルト設定をマージ
         currentSettings = { ...DEFAULT_SETTINGS, ...settings };
 
-        // 永続化ファイルのロードロジック
+        // DBからファイル読込
         if (currentSettings.backgroundUrl === 'indexeddb') {
             try {
                 const fileData = await loadFileFromDB();
@@ -238,6 +232,7 @@
                 currentSettings.backgroundType = 'none';
             }
         } else if (currentSettings.backgroundUrl !== '' && !currentSettings.backgroundUrl.startsWith('blob:')) {
+            // 'indexeddb' でもないのに blob: で始まらないURLは無効（古い設定など）
             currentSettings.backgroundUrl = '';
             currentSettings.backgroundType = 'none';
         }
@@ -246,17 +241,18 @@
     }
 
     async function saveSettings(settings) {
-        // Blob URLが残っている場合はクリーンアップ
+        // 古いBlob URLを破棄
         if (currentBG_BlobUrl && currentBG_BlobUrl !== settings.backgroundUrl) {
             URL.revokeObjectURL(currentBG_BlobUrl);
             currentBG_BlobUrl = null;
         }
 
-        // IndexedDBに保存する際は、URLをプレースホルダーに
+        // DB保存時は 'indexeddb' プレースホルダに
         let settingsToSave = { ...settings };
         if (settingsToSave.backgroundUrl.startsWith('blob:')) {
             settingsToSave.backgroundUrl = 'indexeddb';
         } else if (settingsToSave.backgroundUrl !== 'indexeddb') {
+            // blobでもindexeddbでもない（＝ファイル未選択）
             settingsToSave.backgroundUrl = '';
             settingsToSave.backgroundType = 'none';
         }
@@ -448,9 +444,8 @@
         document.getElementById('contentOpacityValue').textContent = settings.contentOpacity;
     }
 
-    // 背景プレビューの適用
+    // 背景プレビュー
     function applyBackgroundPreview() {
-        // フォーム要素を関数内で取得
         const opacityRange = document.getElementById('opacityRange');
         const brightnessRange = document.getElementById('brightnessRange');
         
@@ -476,21 +471,18 @@
         const closeBtn = document.getElementById('closeSettingsModal');
         const resetBtn = document.getElementById('resetSettingsBtn');
         
-        // ヘッダー
         const headerBgInput = document.getElementById('headerBgColorInput');
         const headerTextInput = document.getElementById('headerTextColorInput');
         const headerStrokeInput = document.getElementById('headerStrokeColorInput');
 
-        // 背景
         const opacityRange = document.getElementById('opacityRange');
         const brightnessRange = document.getElementById('brightnessRange');
         const contentOpacityRange = document.getElementById('contentOpacityRange');
         
-        // ファイル
         const fileInput = document.getElementById('backgroundFileInput');
         const selectFileBtn = document.getElementById('selectBackgroundBtn');
 
-        // ヘッダープレビュー
+        // ヘッダー即時反映
         function applyHeaderPreview() {
             applyHeaderStyles({
                 ...currentSettings,
@@ -503,11 +495,11 @@
         headerTextInput.addEventListener('input', applyHeaderPreview);
         headerStrokeInput.addEventListener('input', applyHeaderPreview);
 
-        // 背景プレビュー
+        // 背景スライダー即時反映
         opacityRange.addEventListener('input', applyBackgroundPreview);
         brightnessRange.addEventListener('input', applyBackgroundPreview);
 
-        // コンテンツ透明度プレビュー
+        // コンテンツ透明度 即時反映
         if (contentOpacityRange) {
              contentOpacityRange.addEventListener('input', (e) => {
                  document.getElementById('contentOpacityValue').textContent = e.target.value;
@@ -515,7 +507,6 @@
              });
         }
         
-        // ファイルリスナー
         if (selectFileBtn) {
             selectFileBtn.addEventListener('click', () => {
                 fileInput.click();
@@ -532,7 +523,6 @@
             });
         }
 
-        // モーダルボタンリスナー
         if (saveBtn) {
             saveBtn.addEventListener('click', async () => {
                 const newSettings = {
@@ -554,7 +544,7 @@
         if (closeBtn) {
             closeBtn.addEventListener('click', async () => {
                 const settings = await getSettings(); // 保存されている設定を再読み込み
-                applyHeaderStyles(settings); 
+                applyHeaderStyles(settings); // プレビューを元に戻す
                 applyBackgroundStyle(settings);
                 applyContentOpacityStyle(settings.contentOpacity);
                 modal.style.display = 'none';
@@ -608,11 +598,11 @@
              const blobUrl = URL.createObjectURL(file);
              currentBG_BlobUrl = blobUrl;
 
-             // グローバル設定（実行時）を更新
+             // 実行中の設定(currentSettings)を更新
              currentSettings.backgroundUrl = blobUrl;
              currentSettings.backgroundType = type;
              
-             // 背景スライダーの値はそのままに、背景のみプレビュー
+             // 背景プレビューを更新
              applyBackgroundPreview();
              
              const modal = document.getElementById('custom-settings-modal');
@@ -731,7 +721,7 @@
     function injectBackgroundElements() {
         if (!document.querySelector(BODY_SELECTOR)) return;
 
-        // 動画要素
+        // 背景動画エレメント
         if (!document.getElementById('background-video')) {
             const video = document.createElement('video');
             video.id = 'background-video';
@@ -756,7 +746,7 @@
             };
         }
 
-        // 画像コンテナ要素
+        // 背景画像エレメント
         if (!document.getElementById('background-image-container')) {
             const imageContainer = document.createElement('div');
             imageContainer.id = 'background-image-container';
@@ -1045,7 +1035,7 @@
                 if (editBtn) {
                     editBtn.addEventListener('click', async () => {
                         let modal = document.getElementById('timetable-modal');
-                        if (modal) modal.remove();
+                        if (modal) modal.remove(); // 毎回作り直す
                         const latestTimetable = await getTimetable();
                         injectEditModal(latestTimetable);
                         document.getElementById('timetable-modal').style.display = 'flex';
@@ -1075,7 +1065,6 @@
             }
         } else {
             timetable = DEFAULT_TIMETABLE;
-            // デフォルトを保存
             chrome.storage.local.set({ [TIMETABLE_STORAGE_KEY]: JSON.stringify(DEFAULT_TIMETABLE) });
         }
         return timetable;
@@ -1333,6 +1322,7 @@
                     const deadlineItems = eventList.querySelectorAll('[data-region="event-list-item"]');
                     deadlineItems.forEach(item => {
                         const infoText = item.querySelector('.timeline-name small.mb-0')?.textContent || '';
+                        // "due" や "closes" などのキーワードで判定
                         const isDue = infoText.includes('due') || infoText.includes('closes') ||
                                      infoText.includes('提出期限') || infoText.includes('終了');
                         if (isDue) {
