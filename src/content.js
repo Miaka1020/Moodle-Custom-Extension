@@ -1,23 +1,19 @@
 (function() {
     'use strict';
 
-<<<<<<< HEAD
     // --- 定数 (Constants) ---
 
     // IndexedDB
-=======
-    /* Constants */
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
     const DB_NAME = 'MoodleCustomBGDB';
     const DB_VERSION = 2;
     const STORE_NAME = 'background_files';
     const DB_KEY_BG = 'current_bg';
 
-    /* Storage Keys */
+    // ストレージキー
     const SETTINGS_STORAGE_KEY = 'moodle_custom_settings_v4';
     const TIMETABLE_STORAGE_KEY = 'moodle_custom_timetable_v2';
 
-    /* Defaults */
+    // デフォルト設定
     const DEFAULT_SETTINGS = {
         headerBgColor: "#ffffff",
         headerTextColor: "#000000",
@@ -30,7 +26,6 @@
         contentOpacity: 70
     };
 
-<<<<<<< HEAD
     // 時間割
     const DEFAULT_TIMETABLE = {
         "月": {},
@@ -39,10 +34,6 @@
         "木": {},
         "金": {},
         "土": {}, "日": {}
-=======
-    const DEFAULT_TIMETABLE = {
-        "月": {}, "火": {}, "水": {}, "木": {}, "金": {}, "土": {}, "日": {}
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
     };
     const CLASS_TIMES = [
         { start: 900, end: 1030, period: 1 }, { start: 1040, end: 1210, period: 2 }, { start: 1255, end: 1425, period: 3 },
@@ -50,27 +41,22 @@
     ];
     const DAY_MAP = ["日", "月", "火", "水", "木", "金", "土"];
 
-    /* Selectors */
+    // セレクタ
     const BODY_SELECTOR = 'body#page-my-index, body#page-course-view-topics, body#page-course-view-weeks,body#page';
     const PAGE_WRAPPER_SELECTOR = '#page-wrapper';
     const DASHBOARD_REGION_SELECTOR = '#block-region-content';
 
-<<<<<<< HEAD
     // --- グローバル変数 (Global Variables) ---
 
-=======
-    /* Globals */
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
     let db;
     let currentSettings = {};
     let currentBG_BlobUrl = null;
     let quizAnswerStore = new Map();
     let isRetakeMode = false;
     let retakeStartTime = null;
-<<<<<<< HEAD
     let timelineDeadlines = []; // ★ タイムラインからパースした期限情報を保持する配列
     
-    // カウントダウン＆ポーリング用
+    // ★★★ カウントダウン＆ポーリング用 ★★★
     let countdownTimerInterval = null;
     let timelinePoller = null; 
     let pollAttempts = 0; 
@@ -90,37 +76,28 @@
         
         // 3. UI（モーダル等）を挿入
         injectGithubButton(); 
-=======
-
-
-    /* Initialization */
-    async function init() {
-        // 固定スタイルを先に挿入
-        injectStaticStyles();
-
-        await setupIndexedDB();
-        
-        const settings = await getSettings();
-        
-        injectGithubButton();
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
         injectSettingsButton();
         injectSettingsModal(settings);
         
         const timetable = await getTimetable(); 
         injectEditModal(timetable);
 
-<<<<<<< HEAD
         // 4. 全てのスタイルと機能を適用
+        // ★ 修正: await を追加し、この処理が完了するのを待つ
         await applyAllCustomStyles(false); 
 
-        // 5.  期限読み込みポーリングを開始 
+        // 5. ★★★ 期限読み込みポーリングを開始 ★★★
         // (1回目の描画が完了した後でポーリングを開始する)
         if (document.URL.includes('/my/')) {
             startTimelinePoller();
         }
     }
 
+    // ★★★ 新しいポーリング関数 ★★★
+    /**
+     * 機能: Moodleのタイムラインが読み込まれるまで監視（ポーリング）する
+     * 読み込みが完了したら、解析と時間割の再描画をキックする
+     */
     function startTimelinePoller() {
         // 既存のポーラーがあれば停止
         if (timelinePoller) {
@@ -167,17 +144,6 @@
 
 
     // --- IndexedDB ---
-=======
-        // スタイルと機能をすべて適用
-        applyAllCustomStyles(false); // reloadSettings = false
-
-        // 期限ハイライトはレンダリング待ちで遅延実行
-        setTimeout(applyDeadlineHighlight, 1500);
-    }
-
-
-    /* IndexedDB Logic */
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
     function setupIndexedDB() {
         return new Promise((resolve, reject) => {
             if (!window.indexedDB) {
@@ -208,7 +174,7 @@
             const transaction = db.transaction([STORE_NAME], 'readwrite');
             const store = transaction.objectStore(STORE_NAME);
             const data = { id: DB_KEY_BG, blob: blob, type: mimeType };
-            const request = store.put(data); // 常に上書き
+            const request = store.put(data); // 常に同じキーで上書き
             request.onsuccess = () => resolve();
             request.onerror = (e) => reject(e);
         });
@@ -233,11 +199,7 @@
         });
     }
 
-<<<<<<< HEAD
     // --- 設定 (Storage) ---
-=======
-    /* Settings (Storage) */
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
     async function getSettings() {
         const data = await chrome.storage.local.get(SETTINGS_STORAGE_KEY);
         let settings;
@@ -254,10 +216,10 @@
             settings = DEFAULT_SETTINGS;
         }
 
-        // デフォルト設定をマージ
+        // デフォルト値とのマージ
         currentSettings = { ...DEFAULT_SETTINGS, ...settings };
 
-        // DBからファイル読込
+        // 永続化ファイルのロードロジック
         if (currentSettings.backgroundUrl === 'indexeddb') {
             try {
                 const fileData = await loadFileFromDB();
@@ -276,7 +238,6 @@
                 currentSettings.backgroundType = 'none';
             }
         } else if (currentSettings.backgroundUrl !== '' && !currentSettings.backgroundUrl.startsWith('blob:')) {
-            // 'indexeddb' でもないのに blob: で始まらないURLは無効（古い設定など）
             currentSettings.backgroundUrl = '';
             currentSettings.backgroundType = 'none';
         }
@@ -285,18 +246,17 @@
     }
 
     async function saveSettings(settings) {
-        // 古いBlob URLを破棄
+        // Blob URLが残っている場合はクリーンアップ
         if (currentBG_BlobUrl && currentBG_BlobUrl !== settings.backgroundUrl) {
             URL.revokeObjectURL(currentBG_BlobUrl);
             currentBG_BlobUrl = null;
         }
 
-        // DB保存時は 'indexeddb' プレースホルダに
+        // IndexedDBに保存する際は、URLをプレースホルダーに
         let settingsToSave = { ...settings };
         if (settingsToSave.backgroundUrl.startsWith('blob:')) {
             settingsToSave.backgroundUrl = 'indexeddb';
         } else if (settingsToSave.backgroundUrl !== 'indexeddb') {
-            // blobでもindexeddbでもない（＝ファイル未選択）
             settingsToSave.backgroundUrl = '';
             settingsToSave.backgroundType = 'none';
         }
@@ -306,7 +266,6 @@
     }
 
 
-<<<<<<< HEAD
     // --- UI挿入・イベント (Settings Modal) ---
 
     // ★★★ GitHubボタン挿入関数 (V2) ★★★
@@ -314,31 +273,15 @@
         // 挿入先を primary-navigation から usermenu (右上のアイコン領域) に変更
         const usermenu = document.querySelector('#usernavigation .usermenu');
         if (!usermenu || document.getElementById('custom-github-nav-item')) return;
-=======
-    /* UI Injection & Events */
-
-    // GitHubボタン挿入
-    function injectGithubButton() {
-        // メインナビゲーションを探す
-        const primaryNav = document.querySelector('.primary-navigation .navbar-nav');
-        if (!primaryNav || document.getElementById('custom-github-nav-item')) return;
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
 
         const githubItem = document.createElement('li');
         githubItem.classList.add('nav-item');
         githubItem.id = 'custom-github-nav-item';
-<<<<<<< HEAD
         // li要素のスタイルを調整 (他のアイコンと揃える)
         githubItem.style.cssText = "display: flex; align-items: center;";
 
         githubItem.innerHTML = `
           <button id="githubLinkBtnV2" class="github-btn-mangesh636" title="GitHubリポジトリを開く" style="margin-right: 5px;">
-=======
-        githubItem.style.cssText = "display: flex; align-items: center; margin-left: 10px;";
-
-        githubItem.innerHTML = `
-          <button id="githubLinkBtnV2" class="github-btn-mangesh636" title="GitHubリポジトリを開く">
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
             <svg
               viewBox="0 0 24 24"
               fill="currentColor"
@@ -354,15 +297,10 @@
           </button>
         `;
         
-<<<<<<< HEAD
         // .usermenu の *先頭* (prepend) に追加
         // (この後の init() で呼ばれる injectSettingsButton も prepend するため、
         // 最終的な表示順は [設定ボタン][GitHubボタン][検索...] となります)
         usermenu.prepend(githubItem); 
-=======
-        // ナビ末尾に追加
-        primaryNav.appendChild(githubItem); 
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
 
         document.getElementById('githubLinkBtnV2').addEventListener('click', () => {
             window.open('https://github.com/Miaka1020/Moodle-Custom-Extension/', '_blank');
@@ -510,8 +448,9 @@
         document.getElementById('contentOpacityValue').textContent = settings.contentOpacity;
     }
 
-    // 背景プレビュー
+    // 背景プレビューの適用
     function applyBackgroundPreview() {
+        // フォーム要素を関数内で取得
         const opacityRange = document.getElementById('opacityRange');
         const brightnessRange = document.getElementById('brightnessRange');
         
@@ -530,29 +469,28 @@
         });
     }
 
-<<<<<<< HEAD
     // モーダルのイベントリスナー設定
-=======
-    // 設定モーダルのイベント
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
     function bindSettingsModalEvents() {
         const modal = document.getElementById('custom-settings-modal');
         const saveBtn = document.getElementById('saveSettingsBtn');
         const closeBtn = document.getElementById('closeSettingsModal');
         const resetBtn = document.getElementById('resetSettingsBtn');
         
+        // ヘッダー
         const headerBgInput = document.getElementById('headerBgColorInput');
         const headerTextInput = document.getElementById('headerTextColorInput');
         const headerStrokeInput = document.getElementById('headerStrokeColorInput');
 
+        // 背景
         const opacityRange = document.getElementById('opacityRange');
         const brightnessRange = document.getElementById('brightnessRange');
         const contentOpacityRange = document.getElementById('contentOpacityRange');
         
+        // ファイル
         const fileInput = document.getElementById('backgroundFileInput');
         const selectFileBtn = document.getElementById('selectBackgroundBtn');
 
-        // ヘッダー即時反映
+        // ヘッダープレビュー
         function applyHeaderPreview() {
             applyHeaderStyles({
                 ...currentSettings,
@@ -565,11 +503,11 @@
         headerTextInput.addEventListener('input', applyHeaderPreview);
         headerStrokeInput.addEventListener('input', applyHeaderPreview);
 
-        // 背景スライダー即時反映
+        // 背景プレビュー
         opacityRange.addEventListener('input', applyBackgroundPreview);
         brightnessRange.addEventListener('input', applyBackgroundPreview);
 
-        // コンテンツ透明度 即時反映
+        // コンテンツ透明度プレビュー
         if (contentOpacityRange) {
              contentOpacityRange.addEventListener('input', (e) => {
                  document.getElementById('contentOpacityValue').textContent = e.target.value;
@@ -577,6 +515,7 @@
              });
         }
         
+        // ファイルリスナー
         if (selectFileBtn) {
             selectFileBtn.addEventListener('click', () => {
                 fileInput.click();
@@ -593,6 +532,7 @@
             });
         }
 
+        // モーダルボタンリスナー
         if (saveBtn) {
             saveBtn.addEventListener('click', async () => {
                 const newSettings = {
@@ -608,17 +548,13 @@
                 
                 await saveSettings(newSettings);
                 modal.style.display = 'none';
-<<<<<<< HEAD
                 applyAllCustomStyles(true); 
-=======
-                applyAllCustomStyles(true); // 保存して適用
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
             });
         }
         if (closeBtn) {
             closeBtn.addEventListener('click', async () => {
                 const settings = await getSettings(); // 保存されている設定を再読み込み
-                applyHeaderStyles(settings); // プレビューを元に戻す
+                applyHeaderStyles(settings); 
                 applyBackgroundStyle(settings);
                 applyContentOpacityStyle(settings.contentOpacity);
                 modal.style.display = 'none';
@@ -632,21 +568,13 @@
                        currentBG_BlobUrl = null;
                     }
                     try {
-<<<<<<< HEAD
                         // DBが初期化されているか確認
-=======
-                        // DBが初期化されていればクリア
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
                         if (db) {
                             const transaction = db.transaction([STORE_NAME], 'readwrite');
                             const store = transaction.objectStore(STORE_NAME);
                             store.clear();
                         } else {
-<<<<<<< HEAD
                             // DBがまだない場合は、開いてからクリア（または何もしない）
-=======
-                            // DB未初期化なら、開いてクリア
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
                             console.warn("DB not initialized during reset, attempting to open and clear.");
                             await setupIndexedDB();
                             if(db) {
@@ -680,20 +608,16 @@
              const blobUrl = URL.createObjectURL(file);
              currentBG_BlobUrl = blobUrl;
 
-             // 実行中の設定(currentSettings)を更新
+             // グローバル設定（実行時）を更新
              currentSettings.backgroundUrl = blobUrl;
              currentSettings.backgroundType = type;
              
-             // 背景プレビューを更新
+             // 背景スライダーの値はそのままに、背景のみプレビュー
              applyBackgroundPreview();
              
              const modal = document.getElementById('custom-settings-modal');
              if (modal && modal.style.display === 'flex') {
-<<<<<<< HEAD
                  // 必要なUIだけをピンポイントで更新する
-=======
-                 // モーダル内の表示を更新
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
                  document.getElementById('currentBackgroundInfo').innerHTML = `<b>現在の背景</b>: ローカルファイル (IndexedDB経由・永続化済み)`;
                  document.getElementById('bg-type-video').checked = (type === 'video');
                  document.getElementById('bg-type-image').checked = (type === 'image');
@@ -707,35 +631,22 @@
     }
 
 
-<<<<<<< HEAD
     // --- 動的スタイル適用 (Dynamic Styles) ---
-=======
-    /* Dynamic Styles */
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
 
     async function applyAllCustomStyles(reloadSettings = true) {
         if(reloadSettings) { 
             await getSettings();
         }
-<<<<<<< HEAD
 
-=======
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
         const settings = currentSettings;
         
         injectBackgroundElements(); 
         applyHeaderStyles(settings); 
         applyBackgroundStyle(settings);
         applyContentOpacityStyle(settings.contentOpacity);
-<<<<<<< HEAD
         await renderTimetableWidget(); // ◀ ここではまず「期限なし」で時間割を描画
         
         // Quiz Retake Feature
-=======
-        await renderTimetableWidget();
-        
-        // 小テスト解き直し機能
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
         if (document.URL.includes('/mod/quiz/review.php')) {
             initQuizRetakeFeature();
         }
@@ -770,28 +681,16 @@
                 text-shadow: none !important;
             }
             
-<<<<<<< HEAD
             /* ★ GitHub Button V2 ヘッダー色連携 (文字潰れ対策) ★ */
             button.github-btn-mangesh636 {
                  color: ${settings.headerTextColor} !important;
                  border: 1px solid ${settings.headerTextColor} !important;
                  /* text-shadow: ${textShadow}; */ /* ← 文字潰れの原因になるため削除 */
-=======
-            /* GitHubボタン 色連携 */
-            button.github-btn-mangesh636 {
-                 color: ${settings.headerTextColor} !important;
-                 border: 1px solid ${settings.headerTextColor} !important;
-                 /* 影は文字が潰れるので除外 */
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
             }
             button.github-btn-mangesh636 svg {
                  fill: ${settings.headerTextColor} !important;
             }
-<<<<<<< HEAD
             /* ホバー時は StaticStyles の :hover が優先される */
-=======
-            /* (hoverスタイルはstatic側で定義) */
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
         `;
     }
 
@@ -832,7 +731,7 @@
     function injectBackgroundElements() {
         if (!document.querySelector(BODY_SELECTOR)) return;
 
-        // 背景動画エレメント
+        // 動画要素
         if (!document.getElementById('background-video')) {
             const video = document.createElement('video');
             video.id = 'background-video';
@@ -857,7 +756,7 @@
             };
         }
 
-        // 背景画像エレメント
+        // 画像コンテナ要素
         if (!document.getElementById('background-image-container')) {
             const imageContainer = document.createElement('div');
             imageContainer.id = 'background-image-container';
@@ -881,15 +780,10 @@
             document.head.appendChild(contentStyle);
         }
 
-<<<<<<< HEAD
         // 基準色は「白」 (255, 255, 255)
         const baseR = 255;
         const baseG = 255;
         const baseB = 255;
-=======
-        // ウィジェットは少し濃く
-        const widgetOpacity = Math.min(opacityRatio + 0.2, 1.0); 
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
 
         // 時間割ウィジェットは少し濃くする
         const widgetOpacity = Math.min(opacityRatio + 0.2, 1.0); 
@@ -907,7 +801,6 @@
         `;
     }
 
-<<<<<<< HEAD
     // ★★★ カウントダウン機能 ここから ★★★
 
     /**
@@ -1114,9 +1007,6 @@
     }
 
     // --- 機能: 時間割 (Timetable Feature) ---
-=======
-    /* Timetable Widget */
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
 
     async function renderTimetableWidget() {
         const targetRegion = document.querySelector(DASHBOARD_REGION_SELECTOR);
@@ -1155,7 +1045,7 @@
                 if (editBtn) {
                     editBtn.addEventListener('click', async () => {
                         let modal = document.getElementById('timetable-modal');
-                        if (modal) modal.remove(); // 毎回作り直す
+                        if (modal) modal.remove();
                         const latestTimetable = await getTimetable();
                         injectEditModal(latestTimetable);
                         document.getElementById('timetable-modal').style.display = 'flex';
@@ -1185,6 +1075,7 @@
             }
         } else {
             timetable = DEFAULT_TIMETABLE;
+            // デフォルトを保存
             chrome.storage.local.set({ [TIMETABLE_STORAGE_KEY]: JSON.stringify(DEFAULT_TIMETABLE) });
         }
         return timetable;
@@ -1209,11 +1100,7 @@
             }
         }
         
-<<<<<<< HEAD
         // 休み時間の判定を修正
-=======
-        // 休み時間の判定
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
         for (let i = 0; i < CLASS_TIMES.length - 1; i++) {
             if (currentTime > CLASS_TIMES[i].end && currentTime < CLASS_TIMES[i+1].start) {
                 return { periodNumber: null, status: '休み時間' };
@@ -1223,12 +1110,8 @@
         return { periodNumber: null, status: '授業時間外' };
     }
 
-<<<<<<< HEAD
     // ★ 引数に deadlines を追加 (正規化比較・カウントダウン対応バージョン)
     function generateWeeklyTimetableHtml(timetable, deadlines) {
-=======
-    function generateWeeklyTimetableHtml(timetable) {
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
         const today = new Date();
         const currentDayName = DAY_MAP[today.getDay()];
         const { periodNumber: currentPeriod, status: currentStatus, course: currentCourse } = getCurrentClassPeriod(timetable);
@@ -1408,44 +1291,26 @@
                 const nameInput = document.getElementById(`name-${day}-${period}`);
                 const idInput = document.getElementById(`id-${day}-${period}`);
                 const name = nameInput ? nameInput.value.trim() : '';
-<<<<<<< HEAD
                 const id = idInput ? idInput.value.trim() : ''; // valueをそのまま取得
 
                 // idが空でなく、かつ数値に変換可能（または数値）であることを確認
-=======
-                const id = idInput ? idInput.value.trim() : ''; 
-
-                // name と id (数値) があれば保存
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
                 if (name && id && !isNaN(parseInt(id))) {
                     newTimetable[day][period] = { name, id: parseInt(id) };
                 }
             }
         }
         
-<<<<<<< HEAD
         // 土日もキーとして存在させておく
-=======
-        // 土日も空データとして保持
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
         newTimetable["土"] = {};
         newTimetable["日"] = {};
 
         await saveTimetable(newTimetable);
         document.getElementById('timetable-modal').style.display = 'none';
-<<<<<<< HEAD
         await renderTimetableWidget();
     }
 
 
     // --- 機能: 期限ハイライト (Deadline Highlight) ---
-=======
-        await renderTimetableWidget(); // 保存後にウィジェットを再描画
-    }
-
-
-    /* Deadline Highlighter */
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
     function applyDeadlineHighlight() {
         if (!document.URL.includes('/my/')) return;
         const timelineBlock = document.querySelector('.block_timeline');
@@ -1468,7 +1333,6 @@
                     const deadlineItems = eventList.querySelectorAll('[data-region="event-list-item"]');
                     deadlineItems.forEach(item => {
                         const infoText = item.querySelector('.timeline-name small.mb-0')?.textContent || '';
-                        // "due" や "closes" などのキーワードで判定
                         const isDue = infoText.includes('due') || infoText.includes('closes') ||
                                      infoText.includes('提出期限') || infoText.includes('終了');
                         if (isDue) {
@@ -1480,11 +1344,7 @@
         });
     }
 
-<<<<<<< HEAD
     // --- 固定スタイル ---
-=======
-    /* Static Styles */
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
     function injectStaticStyles() {
         const style = document.createElement('style');
         style.innerHTML = `
@@ -1534,11 +1394,7 @@
                 position: relative;
             }
             .main-inner, .secondary-navigation d-print-none, .moremenu navigation observed, .nav more-nav nav-tabs, .card-footer border-0 bg-white w-100 {
-<<<<<<< HEAD
                 background-color:  rgba(255, 255, 255, 1) !important;
-=======
-                background-color:  rgba(255, 255, 255, 0.6) !important;
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
             }
             :is(#secondary-navigation d-print-none, #page-content, #region-main, #region-main-box, .block) {
                 background-color: transparent !important;
@@ -1592,7 +1448,6 @@
                 border: none !important;
             }
 
-<<<<<<< HEAD
             /* ★★★ GitHub Button V2 Styles (From Uiverse.io by Mangesh636) ★★★ */
             button.github-btn-mangesh636 {
               background: transparent;
@@ -1601,16 +1456,6 @@
               display: flex;
               align-items: center;
               font-size: 15px; /* ヘッダーに合わせてフォントサイズを調整 */
-=======
-            /* GitHub Button Style (by Mangesh636) */
-            button.github-btn-mangesh636 {
-              background: transparent;
-              position: relative;
-              padding: 5px 10px; 
-              display: flex;
-              align-items: center;
-              font-size: 15px; 
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
               font-weight: 600;
               text-decoration: none;
               cursor: pointer;
@@ -1621,19 +1466,11 @@
               color: rgb(36, 41, 46);
               transition: color 0.3s 0.1s ease-out, border-color 0.3s 0.1s ease-out;
               text-align: center;
-<<<<<<< HEAD
               height: 38px; /* 高さを調整 */
             }
 
             button.github-btn-mangesh636 span {
               margin: 0 5px; /* マージンを調整 */
-=======
-              height: 38px; 
-            }
-
-            button.github-btn-mangesh636 span {
-              margin: 0 5px;
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
             }
 
             button.github-btn-mangesh636 svg {
@@ -1670,12 +1507,7 @@
             button.github-btn-mangesh636:hover::before {
               box-shadow: inset 0 0 0 10em rgb(36, 41, 46);
             }
-<<<<<<< HEAD
               /* --- Quiz Retake Mode Styles (v2) --- */
-=======
-              
-            /* Quiz Retake Styles */
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
             .retake-controls-card {
                 background-color: #ffffff;
                 border: 1px solid #ddd;
@@ -1683,30 +1515,18 @@
                 padding: 20px;
                 margin-bottom: 20px;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-<<<<<<< HEAD
                 position: relative; /* 終了ボタンの配置基準 */
             }
             .retake-controls-card h4 {
                 margin-top: 0;
                 color: #005A9C; /* 落ち着いた青 */
-=======
-                position: relative;
-            }
-            .retake-controls-card h4 {
-                margin-top: 0;
-                color: #005A9C;
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
                 font-weight: 600;
                 border-bottom: 1px solid #eee;
                 padding-bottom: 10px;
                 margin-bottom: 10px;
                 display: flex;
                 align-items: center;
-<<<<<<< HEAD
                 gap: 8px; /* アイコンとテキストの間隔 */
-=======
-                gap: 8px;
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
             }
             .retake-controls-card p {
                 font-size: 0.95em;
@@ -1723,7 +1543,6 @@
                 border: none;
                 border-radius: 5px;
                 cursor: pointer;
-<<<<<<< HEAD
                 font-size: 0.95em; /* 少し小さく調整 */
                 font-weight: 600; /* Moodleボタンに合わせて太く */
                 transition: all 0.2s ease;
@@ -1731,24 +1550,11 @@
                 display: inline-flex; /* アイコンとテキストを中央揃え */
                 align-items: center;
                 gap: 6px; /* アイコンとテキストの間隔 */
-=======
-                font-size: 0.95em;
-                font-weight: 600;
-                transition: all 0.2s ease;
-                text-decoration: none;
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
                 text-align: center;
                 line-height: 1.2;
             }
             .retake-btn-primary {
-<<<<<<< HEAD
                 background-color: #007bff; /* Moodleのプライマリカラー */
-=======
-                background-color: #007bff;
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
                 color: white;
             }
             .retake-btn-primary:hover {
@@ -1785,7 +1591,6 @@
         document.head.appendChild(style);
     }
 
-<<<<<<< HEAD
     // --- 機能: 小テスト解きなおし (Quiz Retake Feature) ---
 
     /**
@@ -1793,31 +1598,17 @@
      */
    function initQuizRetakeFeature() {
         // レビューページでない、またはボタンが既にあれば何もしない
-=======
-    /* Quiz Retake Feature */
-
-    /**
-     * 1. 解き直しUIの挿入
-     */
-   function initQuizRetakeFeature() {
-        // レビューページ以外、またはUI挿入済みなら終了
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
         if (!document.URL.includes('/mod/quiz/review.php') || document.getElementById('retake-controls')) {
             return;
         }
 
-<<<<<<< HEAD
         // メインコンテンツ領域（<div role="main">）を探す
-=======
-        // メイン領域取得
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
         const mainRegion = document.querySelector('#region-main > [role="main"]');
         if (!mainRegion) {
              console.error("Moodle main region not found for Quiz Retake feature.");
              return;
         }
         
-<<<<<<< HEAD
         // 結果表示用の div を先に追加
         const resultContainer = document.createElement('div');
         resultContainer.id = 'retake-result';
@@ -1828,18 +1619,6 @@
         buttonContainer.className = 'retake-controls-card'; // 新しいCSSクラスを適用
 
         // --- HTML構造の変更 (v2) ---
-=======
-        // 結果表示エリア
-        const resultContainer = document.createElement('div');
-        resultContainer.id = 'retake-result';
-
-        // 操作パネル
-        const buttonContainer = document.createElement('div');
-        buttonContainer.id = 'retake-controls';
-        buttonContainer.className = 'retake-controls-card';
-
-        // 操作パネルのHTML
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
         buttonContainer.innerHTML = `
             <button id="exitRetakeBtn" class="retake-btn-exit" title="解き直しを終了" style="display: none;">×</button>
             
@@ -1860,7 +1639,6 @@
             </div>
         `;
 
-<<<<<<< HEAD
         // メインコンテンツの先頭に挿入
         mainRegion.prepend(buttonContainer);
         mainRegion.prepend(resultContainer);
@@ -2569,710 +2347,4 @@
         init();
     }
 
-=======
-        // UIをページに挿入
-        mainRegion.prepend(buttonContainer);
-        mainRegion.prepend(resultContainer);
-
-        // イベント設定
-        document.getElementById('startRetakeBtn').addEventListener('click', startRetakeMode);
-        document.getElementById('gradeRetakeBtn').addEventListener('click', gradeRetakeQuiz);
-        document.getElementById('resetRetakeBtn').addEventListener('click', resetQuizButtons);
-        document.getElementById('exitRetakeBtn').addEventListener('click', exitRetakeMode);
-    }
-
-    /**
-     * 2b. 解き直し終了 (リロード)
-     */
-    function exitRetakeMode() {
-        if (confirm('解き直しモードを終了しますか？\n（ページがリロードされ、元のレビュー画面に戻ります）')) {
-            // 状態リセットが複雑なのでリロードが安全
-            window.location.reload();
-        }
-    }
-
-    /**
-     * 2. 正解の解析と保存
-     */
-    function parseQuizReviewAnswers() {
-        quizAnswerStore.clear();
-        const questions = document.querySelectorAll('div.que');
-
-        questions.forEach(q => {
-            const qid = q.id;
-            if (!qid) return;
-            
-            let answerData = { type: null, answer: null };
-            const rightAnswerElement = q.querySelector('.feedback .rightanswer');
-            let rightAnswerText = '';
-            if (rightAnswerElement) {
-                 rightAnswerText = rightAnswerElement.textContent.trim(); 
-            }
-
-            if (q.classList.contains('multichoice')) {
-                answerData.type = 'multichoice';
-                const correctAnswerElement = q.querySelector('.answer .correct input[type="radio"], .answer .correct input[type="checkbox"]');
-                if (correctAnswerElement) {
-                    answerData.answer = correctAnswerElement.value;
-                }
-            } else if (q.classList.contains('truefalse')) {
-                 answerData.type = 'truefalse';
-                 
-                 if (rightAnswerText.includes("正解は「○」です") || rightAnswerText.toLowerCase().includes("the correct answer is 'true'")) {
-                     answerData.answer = "1";
-                 } else if (rightAnswerText.includes("正解は「×」です") || rightAnswerText.toLowerCase().includes("the correct answer is 'false'")) {
-                     answerData.answer = "0";
-                 } else {
-                     const correctAnswerElement = q.querySelector('.answer .correct input[type="radio"]');
-                     if (correctAnswerElement) {
-                         answerData.answer = correctAnswerElement.value;
-                     }
-                 }
-            } else if (q.classList.contains('numerical')) {
-                answerData.type = 'numerical';
-                if (rightAnswerText) {
-                    const match = rightAnswerText.match(/(?:正解|The correct answer is):\s*([0-9.,]+)/i);
-                    if (match && match[1]) {
-                        answerData.answer = match[1].replace(',', '.');
-                    }
-                }
-            } else if (q.classList.contains('shortanswer')) {
-                 answerData.type = 'shortanswer';
-                 if (rightAnswerText) {
-                     const match = rightAnswerText.match(/(?:正解|The correct answer is):\s*(.*)/i);
-                     if (match && match[1]) {
-                         answerData.answer = match[1];
-                     }
-                 }
-            } else if (q.classList.contains('gapselect')) {
-                answerData.type = 'gapselect';
-                const answers = {};
-                
-                const rightAnswerHTML = rightAnswerElement ? rightAnswerElement.innerHTML : '';
-                const answerMatches = [...rightAnswerHTML.matchAll(/\[([\s\S]*?)\]/g)];
-                
-                const selects = q.querySelectorAll('select');
-                
-                if (answerMatches.length > 0 && selects.length > 0) {
-                    selects.forEach((selectEl, index) => {
-                        const selectId = selectEl.id; 
-                        if (!selectId) return;
-
-                        let correctAnswerValue = null;
-                        
-                        if (answerMatches[index] && answerMatches[index][1]) {
-                            const correctText = answerMatches[index][1].replace(/<[^>]+>/g, '').trim();
-                            const options = selectEl.querySelectorAll('option');
-                            
-                            for (const option of options) {
-                                if (option.textContent.trim() === correctText) {
-                                    correctAnswerValue = option.value;
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (correctAnswerValue !== null) {
-                            answers[selectId] = correctAnswerValue;
-                        }
-                    });
-                }
-                answerData.answer = answers;
-            
-            } else if (q.classList.contains('match')) {
-                // 組み合わせ問題 (match) の解析
-                answerData.type = 'match';
-                const answers = {};
-                
-                // 1. 正解テキストから「問題文 -> 解答文」マップ作成
-                const textToAnswerMap = {};
-                const rightAnswerHTML = rightAnswerElement ? rightAnswerElement.innerHTML : '';
-
-                let processedHTML = rightAnswerHTML;
-                
-                // 改行タグなどを区切り文字に
-                processedHTML = processedHTML.replace(/<(p|div|br)[^>]*>/gi, '|||'); 
-                // 他のHTMLタグ除去
-                processedHTML = processedHTML.replace(/<[^>]+>/g, ''); 
-                
-                // HTMLエンティティ
-                processedHTML = processedHTML.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-
-                const pairs = processedHTML.split('|||');
-                
-                pairs.forEach(part => {
-                    part = part.trim();
-                    
-                    // "A → B" のペアを解析
-                    if (part.includes('→')) {
-                        const match = part.match(/(.+?)\s*→\s*(.+)/);
-                        
-                        if (match && match[1] && match[2]) {
-                            let questionText = match[1].trim();
-                            // 解答文末尾のコンマ除去
-                            let answerText = match[2].trim().replace(/,$/, '').trim(); 
-                            
-                            if (questionText && answerText) {
-                                // "正解:" のプレフィックス除去
-                                if (questionText.startsWith('正解:')) {
-                                    questionText = questionText.substring(3).trim();
-                                }
-                                
-                                if(questionText) {
-                                    textToAnswerMap[questionText] = answerText;
-                                }
-                            }
-                        }
-                    }
-                });
-                
-                // 2. DOMを走査し、マップを使って select の正解 value を特定
-                const subQuestions = q.querySelectorAll('.ablock .answer tr');
-                subQuestions.forEach(tr => {
-                    const textEl = tr.querySelector('.text');
-                    const selectEl = tr.querySelector('.control select');
-                    if (!textEl || !selectEl) return;
-
-                    // 問題文(DOM)取得
-                    const questionTextDOM = textEl.textContent.trim();
-                    
-                    // マップから正解の「解答文」取得
-                    let correctAnswserText = textToAnswerMap[questionTextDOM];
-                    
-                    if (!correctAnswserText) {
-                        // (Debug) マップにキーなし
-                        console.warn(`[Retake Mode] Match-Key not found for: "${questionTextDOM}"`);
-                        
-                        // フォールバック (部分一致)
-                        const domKey = Object.keys(textToAnswerMap).find(key => 
-                            questionTextDOM.includes(key) || key.includes(questionTextDOM)
-                        );
-                        
-                        if(domKey) {
-                             correctAnswserText = textToAnswerMap[domKey];
-                             console.warn(`[Retake Mode] Fallback match found: "${domKey}" -> "${correctAnswserText}"`);
-                        } else {
-                            return; // 見つからない
-                        }
-                    }
-
-                    let correctValue = null;
-                    const options = selectEl.querySelectorAll('option');
-                    
-                    // 3. optionを走査し、解答文に一致する value を探す
-                    for (const option of options) {
-                        if (option.textContent.trim() === correctAnswserText) {
-                            correctValue = option.value;
-                            break;
-                        }
-                    }
-
-                    if (correctValue !== null) {
-                        answers[selectEl.id] = correctValue;
-                    }
-                });
-                answerData.answer = answers;
-            }
-
-            if (answerData.type && answerData.answer !== null && (Object.keys(answerData.answer).length > 0 || typeof answerData.answer !== 'object')) {
-                quizAnswerStore.set(qid, answerData);
-            } else {
-                 console.warn(`[Retake Mode] 問題 ${qid} の正解を解析できませんでした。 (Type: ${q.className}, AnswerText: ${rightAnswerText})`);
-            }
-        });
-        
-         // console.log("Retake Mode: Answers parsed and stored:", quizAnswerStore);
-    }
-
-    /**
-     * 3. 解き直しモード開始
-     */
-    function startRetakeMode() {
-        if (!isRetakeMode) {
-            parseQuizReviewAnswers();
-            if (quizAnswerStore.size === 0) {
-                 alert("エラー: 問題の正解をページから読み取れませんでした。");
-                 return;
-            }
-            isRetakeMode = true;
-        }
-        
-        retakeStartTime = new Date();
-
-        // Moodleの採点結果を隠す
-        document.querySelectorAll('.state, .grade, .outcome').forEach(el => {
-            el.style.display = 'none';
-        });
-        
-        document.querySelectorAll('i.fa-circle-check, i.fa-circle-xmark').forEach(icon => {
-             if (!icon.classList.contains('retake-feedback-icon')) {
-                icon.style.display = 'none';
-             }
-        });
-        
-        document.querySelectorAll('div.que.numerical .ablock i.icon, div.que.shortanswer .ablock i.icon').forEach(icon => {
-             if (!icon.classList.contains('retake-feedback-icon')) {
-                icon.style.display = 'none';
-             }
-        });
-
-        document.querySelectorAll('div.que.gapselect .qtext i.icon').forEach(icon => {
-             if (!icon.classList.contains('retake-feedback-icon')) {
-                icon.style.display = 'none';
-             }
-        });
-        
-        // 組み合わせ(match)問題のアイコンも隠す
-        document.querySelectorAll('div.que.match .control i.icon').forEach(icon => {
-             if (!icon.classList.contains('retake-feedback-icon')) {
-                icon.style.display = 'none';
-             }
-        });
-
-
-        resetRetakeQuiz(); 
-
-        document.getElementById('startRetakeBtn').style.display = 'none';
-        document.getElementById('gradeRetakeBtn').style.display = 'inline-block';
-        document.getElementById('resetRetakeBtn').style.display = 'inline-block';
-        document.getElementById('exitRetakeBtn').style.display = 'block';
-    }
-
-    /**
-     * 4. 入力欄のリセット
-     */
-    function resetRetakeQuiz() {
-        const questions = document.querySelectorAll('div.que');
-        questions.forEach(q => {
-            q.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach(input => {
-                input.disabled = false;
-                input.checked = false;
-            });
-            
-            q.querySelectorAll('input[type="text"]').forEach(input => {
-                if(input.name && input.name.endsWith('_answer')) {
-                    input.disabled = false;
-                    input.readOnly = false;
-                    input.value = '';
-                    input.classList.remove('correct', 'incorrect');
-                }
-            });
-
-            // <select> (gapselect, match) リセット
-            const allSelects = q.querySelectorAll('select');
-            allSelects.forEach(selectEl => {
-                if (selectEl.name && selectEl.name.includes(':')) {
-                    selectEl.disabled = false;
-                    selectEl.selectedIndex = 0;
-                    selectEl.classList.remove('correct', 'incorrect');
-                }
-            });
-            
-            // 採点結果(state)を隠す
-            q.querySelectorAll('.state, .grade, .outcome').forEach(el => {
-                 el.style.display = 'none';
-                 if (el.classList.contains('state')) {
-                     el.style.color = '';
-                     el.textContent = '';
-                 }
-            });
-            
-            // Moodle標準アイコンを隠す
-            q.querySelectorAll('i.fa-circle-check, i.fa-circle-xmark').forEach(icon => {
-                 if (!icon.classList.contains('retake-feedback-icon')) {
-                     icon.style.display = 'none';
-                 }
-            });
-            
-            // 挿入したアイコンを削除
-            q.querySelectorAll('.retake-feedback-icon').forEach(el => {
-                 el.remove();
-            });
-            
-            // アイコンリセット (numerical, shortanswer)
-            const ablockIcon = q.querySelector('.ablock .icon');
-            if (ablockIcon && (q.classList.contains('numerical') || q.classList.contains('shortanswer'))) {
-                 ablockIcon.classList.remove('fa-regular', 'fa-circle-check', 'text-success', 'fa-circle-xmark', 'text-danger');
-                 ablockIcon.style.display = 'none';
-                 ablockIcon.setAttribute('title', '');
-                 ablockIcon.setAttribute('aria-label', '');
-            }
-
-            // アイコンリセット (gapselect)
-            q.querySelectorAll('div.que.gapselect .qtext i.icon').forEach(icon => {
-                 icon.classList.remove('fa-regular', 'fa-circle-check', 'text-success', 'fa-circle-xmark', 'text-danger');
-                 icon.style.display = 'none';
-                 icon.setAttribute('title', '');
-                 icon.setAttribute('aria-label', '');
-            });
-            
-            // アイコンリセット (match)
-            q.querySelectorAll('div.que.match .control i.icon').forEach(icon => {
-                 icon.classList.remove('fa-regular', 'fa-circle-check', 'text-success', 'fa-circle-xmark', 'text-danger');
-                 icon.style.display = 'none';
-                 icon.setAttribute('title', '');
-                 icon.setAttribute('aria-label', '');
-            });
-        });
-        
-        const resultEl = document.getElementById('retake-result');
-        if (resultEl) resultEl.innerHTML = '';
-        
-        retakeStartTime = new Date();
-    }
-
-    /**
-     * 5. リセットボタン
-     */
-    function resetQuizButtons() {
-        resetRetakeQuiz();
-    }
-
-    /**
-     * 6. 自己採点
-     */
-    function gradeRetakeQuiz() {
-        let totalQuestions = 0;
-        let correctAnswers = 0;
-        const retakeEndTime = new Date();
-        
-        let totalMarks = 0;
-        let earnedMarks = 0; // 総合点
-
-        quizAnswerStore.forEach((correctData, qid) => {
-            totalQuestions++;
-            const questionElement = document.getElementById(qid);
-            if (!questionElement) return;
-
-            const stateEl = questionElement.querySelector('.state');
-            const outcomeEl = questionElement.querySelector('.outcome');
-            const gradeEl = questionElement.querySelector('.grade');
-
-            // 評点取得ロジック
-            // textContentで非表示要素の評点も取得
-            let maxMark = 0;
-            if (gradeEl) {
-                // "X / Y" から Y (満点) を取得
-                const match = gradeEl.textContent.match(/[0-9.]+\s*\/\s*([0-9.]+)/);
-                if (match && match[1]) {
-                    maxMark = parseFloat(match[1]);
-                }
-            }
-            totalMarks += maxMark;
-            
-            let earnedMarkForThisQ = 0; // この問題の得点
-            let isCorrect = false; // この問題全体が正解か
-            const qidParts = qid.split('-');
-            if (qidParts.length < 3) return;
-            const inputName = `q${qidParts[1]}:${qidParts[2]}_answer`; 
-
-            // ○×アイコン生成
-            const createIcon = (isCorrect) => {
-                 const iconClass = isCorrect ? 'fa-circle-check text-success' : 'fa-circle-xmark text-danger';
-                 const title = isCorrect ? '正解' : '不正解';
-                 // ms-1: Moodle標準スペーシング
-                 return `<span class="ms-1 retake-feedback-icon">
-                             <i class="icon fa-regular ${iconClass} fa-fw" title="${title}" role="img" aria-label="${title}"></i>
-                         </span>`;
-            };
-
-            if (correctData.type === 'multichoice') {
-                const selectedInput = questionElement.querySelector(`input[name="${inputName}"]:checked`);
-                if (selectedInput && selectedInput.value === correctData.answer) {
-                    isCorrect = true;
-                }
-                const answerInputs = questionElement.querySelectorAll(`.answer input[name="${inputName}"]`);
-                answerInputs.forEach(input => {
-                    const isThisTheCorrectAnswer = (input.value === correctData.answer);
-                    const isThisTheSelectedAnswer = (selectedInput && input.value === selectedInput.value);
-                    const labelDiv = input.closest('.r0, .r1');
-                    if (!labelDiv) return;
-                    if (isThisTheCorrectAnswer) {
-                        labelDiv.insertAdjacentHTML('beforeend', createIcon(true));
-                    } else if (isThisTheSelectedAnswer && !isCorrect) {
-                        labelDiv.insertAdjacentHTML('beforeend', createIcon(false));
-                    }
-                });
-
-            } else if (correctData.type === 'truefalse') {
-                 const selectedInput = questionElement.querySelector(`input[name="${inputName}"]:checked`);
-                if (selectedInput && selectedInput.value === correctData.answer) {
-                    isCorrect = true;
-                }
-                const answerInputs = questionElement.querySelectorAll(`.answer input[name="${inputName}"]`);
-                answerInputs.forEach(input => {
-                    const isThisTheCorrectAnswer = (input.value === correctData.answer);
-                    const isThisTheSelectedAnswer = (selectedInput && input.value === selectedInput.value);
-                    const labelDiv = input.closest('.r0, .r1');
-                    if (!labelDiv) return;
-                    if (isThisTheCorrectAnswer) {
-                        labelDiv.insertAdjacentHTML('beforeend', createIcon(true));
-                    } else if (isThisTheSelectedAnswer && !isCorrect) {
-                         labelDiv.insertAdjacentHTML('beforeend', createIcon(false));
-                    }
-                });
-
-            } else if (correctData.type === 'numerical' || correctData.type === 'shortanswer') {
-                 const textInput = questionElement.querySelector(`input[name="${inputName}"]`);
-                 const userAnswer = (textInput ? textInput.value.trim() : '');
-                 const correctAnswer = (correctData.type === 'numerical') ? correctData.answer.replace(',', '.') : correctData.answer;
-                 const userCompareValue = (correctData.type === 'numerical') ? userAnswer.replace(',', '.') : userAnswer;
-
-                 if (userCompareValue.toLowerCase() === correctAnswer.toLowerCase()) {
-                     isCorrect = true;
-                 }
-                
-                if (textInput) {
-                    textInput.classList.remove('correct', 'incorrect');
-                    textInput.classList.add(isCorrect ? 'correct' : 'incorrect');
-                }
-                 
-                 let iconElement = textInput ? textInput.nextElementSibling : null;
-                 if (!iconElement || iconElement.tagName !== 'I') {
-                      iconElement = textInput ? textInput.parentElement.nextElementSibling : null;
-                 }
-
-                 if (iconElement && iconElement.tagName === 'I' && iconElement.classList.contains('icon')) {
-                     iconElement.classList.remove('fa-regular', 'fa-circle-check', 'text-success', 'fa-circle-xmark', 'text-danger');
-                     if (isCorrect) {
-                         iconElement.classList.add('fa-regular', 'fa-circle-check', 'text-success');
-                         iconElement.setAttribute('title', '正解');
-                         iconElement.setAttribute('aria-label', '正解');
-                     } else {
-                         iconElement.classList.add('fa-regular', 'fa-circle-xmark', 'text-danger');
-                         iconElement.setAttribute('title', '不正解');
-                         iconElement.setAttribute('aria-label', '不正解');
-                     }
-                     iconElement.style.display = 'inline-block';
-                     iconElement.classList.add('retake-feedback-icon');
-                 }
-                 
-            } else if (correctData.type === 'gapselect') {
-                let allGapsCorrect = true;
-                let correctGaps = 0;
-                
-                const selects = questionElement.querySelectorAll('select');
-                let relevantSelects = 0; // 問題に関連するselectの数
-                
-                if (selects.length === 0) {
-                    allGapsCorrect = false;
-                }
-                
-                selects.forEach(selectEl => {
-                    if (!selectEl.name || !selectEl.name.includes(':')) {
-                        return; // 関係ないselectは除外
-                    }
-                    relevantSelects++;
-
-                    const selectId = selectEl.id; 
-                    const correctAnswerValue = correctData.answer[selectId];
-                    const userAnswerValue = selectEl.value;
-                    
-                    let isGapCorrect = (correctAnswerValue !== undefined && userAnswerValue === correctAnswerValue);
-                    
-                    if (isGapCorrect) {
-                        correctGaps++;
-                    } else {
-                        allGapsCorrect = false;
-                    }
-                    
-                    selectEl.classList.remove('correct', 'incorrect');
-                    selectEl.classList.add(isGapCorrect ? 'correct' : 'incorrect');
-                    
-                    const iconElement = selectEl.nextElementSibling;
-                    if (iconElement && iconElement.tagName === 'I' && iconElement.classList.contains('icon')) {
-                         iconElement.classList.remove('fa-regular', 'fa-circle-check', 'text-success', 'fa-circle-xmark', 'text-danger');
-                         if (isGapCorrect) {
-                             iconElement.classList.add('fa-regular', 'fa-circle-check', 'text-success');
-                             iconElement.setAttribute('title', '正解');
-                             iconElement.setAttribute('aria-label', '正解');
-                         } else {
-                             iconElement.classList.add('fa-regular', 'fa-circle-xmark', 'text-danger');
-                             iconElement.setAttribute('title', '不正解');
-                             iconElement.setAttribute('aria-label', '不正解');
-                         }
-                         iconElement.style.display = 'inline-block';
-                         iconElement.classList.add('retake-feedback-icon');
-                    }
-                });
-                
-                isCorrect = allGapsCorrect;
-                
-                // 部分点
-                if (relevantSelects > 0) {
-                     earnedMarkForThisQ = (maxMark * (correctGaps / relevantSelects));
-                } else if (selects.length > 0) {
-                    // フォールバック（あまりないはず）
-                    earnedMarkForThisQ = (maxMark * (correctGaps / selects.length));
-                }
-                earnedMarks += earnedMarkForThisQ;
-            
-            } else if (correctData.type === 'match') {
-                // 組み合わせ問題 (match) 採点
-                let allMatchCorrect = true;
-                let correctMatches = 0;
-                
-                const selects = questionElement.querySelectorAll('.ablock .answer select');
-                if (selects.length === 0) {
-                    allMatchCorrect = false;
-                }
-
-                selects.forEach(selectEl => {
-                    const selectId = selectEl.id;
-                    const correctAnswerValue = correctData.answer[selectId];
-                    const userAnswerValue = selectEl.value;
-
-                    let isMatchCorrect = (correctAnswerValue !== undefined && userAnswerValue === correctAnswerValue);
-
-                    if (isMatchCorrect) {
-                        correctMatches++;
-                    } else {
-                        allMatchCorrect = false;
-                    }
-
-                    // アイコン表示
-                    selectEl.classList.remove('correct', 'incorrect');
-                    selectEl.classList.add(isMatchCorrect ? 'correct' : 'incorrect');
-                    
-                    const controlCell = selectEl.closest('.control');
-                    if (controlCell) {
-                         // Moodle標準の<i>を再利用
-                         const iconElement = controlCell.querySelector('i.icon');
-                         if (iconElement) {
-                             iconElement.classList.remove('fa-regular', 'fa-circle-check', 'text-success', 'fa-circle-xmark', 'text-danger');
-                             if (isMatchCorrect) {
-                                 iconElement.classList.add('fa-regular', 'fa-circle-check', 'text-success');
-                                 iconElement.setAttribute('title', '正解');
-                                 iconElement.setAttribute('aria-label', '正解');
-                             } else {
-                                 iconElement.classList.add('fa-regular', 'fa-circle-xmark', 'text-danger');
-                                 iconElement.setAttribute('title', '不正解');
-                                 iconElement.setAttribute('aria-label', '不正解');
-                             }
-                             iconElement.style.display = 'inline-block';
-                             iconElement.classList.add('retake-feedback-icon');
-                         }
-                    }
-                });
-
-                isCorrect = allMatchCorrect;
-
-                // 部分点
-                if (selects.length > 0) {
-                    earnedMarkForThisQ = (maxMark * (correctMatches / selects.length));
-                }
-                earnedMarks += earnedMarkForThisQ;
-            }
-
-            // --- 正解カウント (gapselect/match以外) ---
-            if (correctData.type !== 'gapselect' && correctData.type !== 'match') {
-                if (isCorrect) {
-                    correctAnswers++;
-                    earnedMarkForThisQ = maxMark;
-                    earnedMarks += maxMark;
-                }
-            }
-
-            // --- 共通フィードバック (正解/不正解) ---
-            if (stateEl) {
-                if ((correctData.type === 'gapselect' || correctData.type === 'match') && !isCorrect && earnedMarkForThisQ > 0) {
-                     stateEl.textContent = '部分的に正解';
-                     stateEl.style.color = '#FF8C00'; // オレンジ
-                } else {
-                    stateEl.textContent = isCorrect ? '正解' : '不正解';
-                    stateEl.style.color = isCorrect ? '#28a745' : '#dc3545';
-                }
-                stateEl.style.display = 'block'; 
-            }
-            
-            // 評点表示の更新
-            if (gradeEl) {
-                gradeEl.innerHTML = `${earnedMarkForThisQ.toFixed(2)} / ${maxMark.toFixed(2)}`;
-                gradeEl.style.display = 'block';
-            }
-
-            if (outcomeEl) {
-                outcomeEl.style.display = 'block';
-            }
-
-        }); // end forEach
-
-        // --- 総合結果の表示 ---
-        const resultEl = document.getElementById('retake-result');
-        if (resultEl) {
-            
-            let durationString = '-';
-            if (retakeStartTime) {
-                const durationMs = retakeEndTime.getTime() - retakeStartTime.getTime();
-                const totalSeconds = Math.round(durationMs / 1000);
-                const minutes = Math.floor(totalSeconds / 60);
-                const seconds = totalSeconds % 60;
-                durationString = `${minutes} 分 ${seconds} 秒`;
-            }
-            
-            const formatDate = (date) => {
-                 if (!date) return '-';
-                 const options = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long', hour: '2-digit', minute: '2-digit', hour12: false };
-                 try {
-                     return date.toLocaleString('ja-JP', options);
-                 } catch (e) {
-                     return date.toLocaleString(); // フォールバック
-                 }
-            };
-            
-            const scorePercentage = totalMarks > 0 ? (earnedMarks / totalMarks) * 100 : 0;
-
-            let resultHTML = `
-                <h3 style="margin-top: 1.5rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">解き直し結果</h3>
-                <div class="mb-3">
-                    <table class="table generaltable generalbox quizreviewsummary mb-0">
-                       <caption class="visually-hidden">結果の概要</caption>
-                       <tbody>
-                            <tr>
-                                <th class="cell" scope="row">ステータス</th>
-                                <td class="cell">解き直し完了</td>
-                            </tr>
-                            <tr>
-                                <th class="cell" scope="row">開始日時</th>
-                                <td class="cell">${formatDate(retakeStartTime)}</td>
-                            </tr>
-                            <tr>
-                                <th class="cell" scope="row">完了日時</th>
-                                <td class="cell">${formatDate(retakeEndTime)}</td>
-                            </tr>
-                            <tr>
-                                <th class="cell" scope="row">継続時間</th>
-                                <td class="cell">${durationString}</td>
-                            </tr>
-                            <tr>
-                                <th class="cell" scope="row">評点</th>
-                                <td class="cell"><b>${earnedMarks.toFixed(2)}</b> / ${totalMarks.toFixed(2)} (<b>${scorePercentage.toFixed(0)}</b>%)</td>
-                            </tr>
-                       </tbody>
-                    </table>
-                </div>
-            `;
-            
-            // 満点チェック (浮動小数点誤差考慮)
-            if (Math.abs(totalMarks - earnedMarks) < 0.001) {
-                resultHTML += `<p style="color: #028dffff; font-weight: bold; font-size: 1.1em; margin-top: 1rem;">素晴らしい！全問正解です！</p>`;
-            } else {
-                 resultHTML += `<p style="color: #ff3131e1; font-size: 1.1em; margin-top: 1rem;">間違えた問題を確認して「リセット」でもう一度挑戦できます。</p>`;
-            }
-            
-            resultEl.innerHTML = resultHTML;
-
-            retakeStartTime = new Date(); // 次の挑戦のために開始時間をリセット
-        }
-    }
-
-    /* Init */
-    
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
-
->>>>>>> 8656019de415632ad8bd4a42fbf3589cabb1ee26
 })();

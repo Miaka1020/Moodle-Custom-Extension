@@ -26,7 +26,7 @@
 * **カスタム時間割**
     * ダッシュボードへのカスタム時間割ウィジェットの追加・編集
     <p align="center">
-      <img src="assets/screenshot-03.png" width="500">
+      <img src="assets/screenshot-07.png" width="500">
       <br>
       <em>カスタム時間割の表示例</em>
     </p>
@@ -40,11 +40,14 @@
 
 
 * **解き直しモード**
-    <p align="center">
-      <img src="assets/screenshot-06.png" width="500">
-      <br>
-      <em>解き直しモードの表示例</em>
-    </p>
+> [!WARNING]
+> ※機能しない可能性があります
+<p align="center">
+  <img src="assets/screenshot-06.png" width="500">
+</p>
+<p align="center">
+  <em>解き直しモードの表示例</em>
+</p>
 
 ---
 
