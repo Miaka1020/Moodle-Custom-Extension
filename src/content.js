@@ -1,8 +1,6 @@
 (function() {
     'use strict';
 
-    // --- 定数 (Constants) ---
-
     // IndexedDB
     const DB_NAME = 'MoodleCustomBGDB';
     const DB_VERSION = 2;
@@ -10,8 +8,9 @@
     const DB_KEY_BG = 'current_bg';
 
     // ストレージキー
-    const SETTINGS_STORAGE_KEY = 'moodle_custom_settings_v4';
+    const SETTINGS_STORAGE_KEY = 'moodle_custom_settings_v5';
     const TIMETABLE_STORAGE_KEY = 'moodle_custom_timetable_v2';
+    const FONT_CACHE_KEY = 'moodle_fast_font_cache_v2'; 
 
     // デフォルト設定
     const DEFAULT_SETTINGS = {
@@ -23,17 +22,15 @@
         opacity: 80,
         brightness: 100,
         showTimetable: true,
-        contentOpacity: 70
+        contentOpacity: 70,
+        fontFamily: "default", 
+        customFontName: "",
+        customFontUrl: "" 
     };
 
     // 時間割
     const DEFAULT_TIMETABLE = {
-        "月": {},
-        "火": {},
-        "水": {},
-        "木": {},
-        "金": {},
-        "土": {}, "日": {}
+        "月": {}, "火": {}, "水": {}, "木": {}, "金": {}, "土": {}, "日": {}
     };
     const CLASS_TIMES = [
         { start: 900, end: 1030, period: 1 }, { start: 1040, end: 1210, period: 2 }, { start: 1255, end: 1425, period: 3 },
@@ -46,35 +43,50 @@
     const PAGE_WRAPPER_SELECTOR = '#page-wrapper';
     const DASHBOARD_REGION_SELECTOR = '#block-region-content';
 
-    // --- グローバル変数 (Global Variables) ---
-
+    // --- グローバル変数 ---
     let db;
     let currentSettings = {};
     let currentBG_BlobUrl = null;
     let quizAnswerStore = new Map();
     let isRetakeMode = false;
     let retakeStartTime = null;
-    let timelineDeadlines = []; // ★ タイムラインからパースした期限情報を保持する配列
-    
-    // ★★★ カウントダウン＆ポーリング用 ★★★
+    let timelineDeadlines = []; 
     let countdownTimerInterval = null;
     let timelinePoller = null; 
     let pollAttempts = 0; 
-    const MAX_POLL_ATTEMPTS = 60; // 60回 * 500ms = 30秒
+    const MAX_POLL_ATTEMPTS = 60;
+
+    try {
+        const cachedFontJson = localStorage.getItem(FONT_CACHE_KEY);
+        if (cachedFontJson) {
+            const cachedSettings = JSON.parse(cachedFontJson);
+            applyFontStyle(cachedSettings); 
+        }
+    } catch (e) {
+        console.warn("Fast font apply failed:", e);
+    }
 
 
     // --- メイン処理 (Initialization) ---
     async function init() {
-        // 固定スタイルを挿入
         injectStaticStyles();
-
-        // 1. DBを初期化
         await setupIndexedDB();
         
-        // 2. 設定を読み込み
         const settings = await getSettings();
         
-        // 3. UI（モーダル等）を挿入
+        // 初回キャッシュ作成
+        if (!localStorage.getItem(FONT_CACHE_KEY)) {
+            saveFontCache(settings);
+        }
+
+        if (document.body) {
+            startUIInjection(settings);
+        } else {
+            document.addEventListener('DOMContentLoaded', () => startUIInjection(settings));
+        }
+    }
+    
+    async function startUIInjection(settings) {
         injectGithubButton(); 
         injectSettingsButton();
         injectSettingsModal(settings);
@@ -82,64 +94,15 @@
         const timetable = await getTimetable(); 
         injectEditModal(timetable);
 
-        // 4. 全てのスタイルと機能を適用
-        // ★ 修正: await を追加し、この処理が完了するのを待つ
         await applyAllCustomStyles(false); 
 
-        // 5. ★★★ 期限読み込みポーリングを開始 ★★★
-        // (1回目の描画が完了した後でポーリングを開始する)
         if (document.URL.includes('/my/')) {
             startTimelinePoller();
         }
-    }
-
-    // ★★★ 新しいポーリング関数 ★★★
-    /**
-     * 機能: Moodleのタイムラインが読み込まれるまで監視（ポーリング）する
-     * 読み込みが完了したら、解析と時間割の再描画をキックする
-     */
-    function startTimelinePoller() {
-        // 既存のポーラーがあれば停止
-        if (timelinePoller) {
-            clearInterval(timelinePoller);
+        
+        if (document.URL.includes('/mod/quiz/review.php')) {
+            initQuizRetakeFeature();
         }
-        pollAttempts = 0;
-
-        timelinePoller = setInterval(async () => {
-            pollAttempts++;
-
-            // タイムラインブロックの「中身」が読み込まれたかチェック
-            const timelineContent = document.querySelector('.block_timeline [data-region="event-list-content-date"]');
-            
-            if (timelineContent) {
-                // 中身が見つかった！
-                // console.log("Timeline content found! Parsing...");
-                clearInterval(timelinePoller); // ポーリング停止
-                timelinePoller = null;
-
-                parseTimelineDeadlines(); // データを解析
-
-                // 期限ハイライトもここで実行
-                applyDeadlineHighlight();
-
-                // 解析結果がある場合のみ、時間割を再描画
-                if (timelineDeadlines.length > 0) {
-                    // console.log("Deadlines parsed successfully. Re-rendering widget.");
-                    await renderTimetableWidget(); // 時間割を再描画（これでタイマーも起動する）
-                } else {
-                    // console.log("Timeline content found, but no deadlines parsed. (Maybe no deadlines?)");
-                }
-
-            } else if (pollAttempts > MAX_POLL_ATTEMPTS) {
-                // 30秒待っても見つからなければ諦める
-                // console.warn("Timeline content not found after 30 seconds. Stopping poller.");
-                clearInterval(timelinePoller);
-                timelinePoller = null;
-            } else {
-                // console.log("Polling for timeline content... attempt " + pollAttempts);
-            }
-
-        }, 200); // 0.2秒ごとにチェック
     }
 
 
@@ -147,7 +110,6 @@
     function setupIndexedDB() {
         return new Promise((resolve, reject) => {
             if (!window.indexedDB) {
-                console.warn("IndexedDB not supported.");
                 return resolve(null);
             }
             const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -162,7 +124,6 @@
                 resolve(db);
             };
             request.onerror = (event) => {
-                console.error("IndexedDB error:", event.target.errorCode);
                 reject(event.target.errorCode);
             };
         });
@@ -174,7 +135,7 @@
             const transaction = db.transaction([STORE_NAME], 'readwrite');
             const store = transaction.objectStore(STORE_NAME);
             const data = { id: DB_KEY_BG, blob: blob, type: mimeType };
-            const request = store.put(data); // 常に同じキーで上書き
+            const request = store.put(data); 
             request.onsuccess = () => resolve();
             request.onerror = (e) => reject(e);
         });
@@ -209,17 +170,14 @@
             try {
                 settings = JSON.parse(stored);
             } catch (e) {
-                console.error("設定データのパースに失敗。デフォルトを使用します。", e);
                 settings = DEFAULT_SETTINGS;
             }
         } else {
             settings = DEFAULT_SETTINGS;
         }
 
-        // デフォルト値とのマージ
         currentSettings = { ...DEFAULT_SETTINGS, ...settings };
 
-        // 永続化ファイルのロードロジック
         if (currentSettings.backgroundUrl === 'indexeddb') {
             try {
                 const fileData = await loadFileFromDB();
@@ -233,7 +191,6 @@
                     currentSettings.backgroundType = 'none';
                 }
             } catch (e) {
-                console.error("Failed to load file from IndexedDB:", e);
                 currentSettings.backgroundUrl = '';
                 currentSettings.backgroundType = 'none';
             }
@@ -245,14 +202,25 @@
         return currentSettings;
     }
 
+    // フォントキャッシュ保存用ヘルパー
+    function saveFontCache(settings) {
+        try {
+            localStorage.setItem(FONT_CACHE_KEY, JSON.stringify({
+                fontFamily: settings.fontFamily,
+                customFontName: settings.customFontName,
+                customFontUrl: settings.customFontUrl
+            }));
+        } catch (e) { console.warn("Failed to update font cache", e); }
+    }
+
     async function saveSettings(settings) {
-        // Blob URLが残っている場合はクリーンアップ
         if (currentBG_BlobUrl && currentBG_BlobUrl !== settings.backgroundUrl) {
             URL.revokeObjectURL(currentBG_BlobUrl);
             currentBG_BlobUrl = null;
         }
 
-        // IndexedDBに保存する際は、URLをプレースホルダーに
+        saveFontCache(settings);
+
         let settingsToSave = { ...settings };
         if (settingsToSave.backgroundUrl.startsWith('blob:')) {
             settingsToSave.backgroundUrl = 'indexeddb';
@@ -262,44 +230,30 @@
         }
 
         await chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: JSON.stringify(settingsToSave) });
-        currentSettings = settings; // 実行中の設定はBlob URLを保持
+        currentSettings = settings; 
     }
 
 
     // --- UI挿入・イベント (Settings Modal) ---
 
-    // ★★★ GitHubボタン挿入関数 (V2) ★★★
     function injectGithubButton() {
-        // 挿入先を primary-navigation から usermenu (右上のアイコン領域) に変更
         const usermenu = document.querySelector('#usernavigation .usermenu');
         if (!usermenu || document.getElementById('custom-github-nav-item')) return;
 
         const githubItem = document.createElement('li');
         githubItem.classList.add('nav-item');
         githubItem.id = 'custom-github-nav-item';
-        // li要素のスタイルを調整 (他のアイコンと揃える)
         githubItem.style.cssText = "display: flex; align-items: center;";
 
         githubItem.innerHTML = `
           <button id="githubLinkBtnV2" class="github-btn-mangesh636" title="GitHubリポジトリを開く" style="margin-right: 5px;">
-            <svg
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              height="20"
-              width="20"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                d="M12.001 2C6.47598 2 2.00098 6.475 2.00098 12C2.00098 16.425 4.86348 20.1625 8.83848 21.4875C9.33848 21.575 9.52598 21.275 9.52598 21.0125C9.52598 20.775 9.51348 19.9875 9.51348 19.15C7.00098 19.6125 6.35098 18.5375 6.15098 17.975C6.03848 17.6875 5.55098 16.8 5.12598 16.5625C4.77598 16.375 4.27598 15.9125 5.11348 15.9C5.90098 15.8875 6.46348 16.625 6.65098 16.925C7.55098 18.4375 8.98848 18.0125 9.56348 17.75C9.65098 17.1 9.91348 16.6625 10.201 16.4125C7.97598 16.1625 5.65098 15.3 5.65098 11.475C5.65098 10.3875 6.03848 9.4875 6.67598 8.7875C6.57598 8.5375 6.22598 7.5125 6.77598 6.1375C6.77598 6.1375 7.61348 5.875 9.52598 7.1625C10.326 6.9375 11.176 6.825 12.026 6.825C12.876 6.825 13.726 6.9375 14.526 7.1625C16.4385 5.8625 17.276 6.1375 17.276 6.1375C17.826 7.5125 17.476 8.5375 17.376 8.7875C18.0135 9.4875 18.401 10.375 18.401 11.475C18.401 15.3125 16.0635 16.1625 13.8385 16.4125C14.201 16.725 14.5135 17.325 14.5135 18.2625C14.5135 19.6 14.501 20.675 14.501 21.0125C14.501 21.275 14.6885 21.5875 15.1885 21.4875C19.259 20.1133 21.9999 16.2963 22.001 12C22.001 6.475 17.526 2 12.001 2Z"
-              ></path>
+            <svg viewBox="0 0 24 24" fill="currentColor" height="20" width="20" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12.001 2C6.47598 2 2.00098 6.475 2.00098 12C2.00098 16.425 4.86348 20.1625 8.83848 21.4875C9.33848 21.575 9.52598 21.275 9.52598 21.0125C9.52598 20.775 9.51348 19.9875 9.51348 19.15C7.00098 19.6125 6.35098 18.5375 6.15098 17.975C6.03848 17.6875 5.55098 16.8 5.12598 16.5625C4.77598 16.375 4.27598 15.9125 5.11348 15.9C5.90098 15.8875 6.46348 16.625 6.65098 16.925C7.55098 18.4375 8.98848 18.0125 9.56348 17.75C9.65098 17.1 9.91348 16.6625 10.201 16.4125C7.97598 16.1625 5.65098 15.3 5.65098 11.475C5.65098 10.3875 6.03848 9.4875 6.67598 8.7875C6.57598 8.5375 6.22598 7.5125 6.77598 6.1375C6.77598 6.1375 7.61348 5.875 9.52598 7.1625C10.326 6.9375 11.176 6.825 12.026 6.825C12.876 6.825 13.726 6.9375 14.526 7.1625C16.4385 5.8625 17.276 6.1375 17.276 6.1375C17.826 7.5125 17.476 8.5375 17.376 8.7875C18.0135 9.4875 18.401 10.375 18.401 11.475C18.401 15.3125 16.0635 16.1625 13.8385 16.4125C14.201 16.725 14.5135 17.325 14.5135 18.2625C14.5135 19.6 14.501 20.675 14.501 21.0125C14.501 21.275 14.6885 21.5875 15.1885 21.4875C19.259 20.1133 21.9999 16.2963 22.001 12C22.001 6.475 17.526 2 12.001 2Z"></path>
             </svg>
             <span>GitHub</span>
           </button>
         `;
         
-        // .usermenu の *先頭* (prepend) に追加
-        // (この後の init() で呼ばれる injectSettingsButton も prepend するため、
-        // 最終的な表示順は [設定ボタン][GitHubボタン][検索...] となります)
         usermenu.prepend(githubItem); 
 
         document.getElementById('githubLinkBtnV2').addEventListener('click', () => {
@@ -334,90 +288,281 @@
         });
     }
 
-    function injectSettingsModal(settings) {
+   function injectSettingsModal(settings) {
+        injectModernModalStyles();
+
         const modalHtml = `
-            <div id="custom-settings-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); z-index: 10001; display: none; justify-content: center; align-items: center;">
-                <div id="custom-settings-content" style="background-color: white; padding: 30px; border-radius: 8px; width: 95%; max-width: 600px; max-height: 90%; box-shadow: 0 5px 15px rgba(0,0,0,0.5); position: relative; display: flex; flex-direction: column;">
-                    <h4 style="margin-top: 0; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
-                       Moodle カスタム設定
-                    </h4>
-                    <div style="overflow-y: auto; flex-grow: 1;">
-
-                        <fieldset style="border: 1px solid #ccc; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
-                            <legend style="font-weight: bold; padding: 0 10px; width: auto; margin-left: -5px;">ヘッダー設定</legend>
-                            <div style="display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center;">
-                                <label for="headerBgColorInput" style="font-weight: 500;">背景色:</label>
-                                <input type="color" id="headerBgColorInput" value="${settings.headerBgColor}" style="height: 35px; width: 100%; border: 1px solid #ccc; padding: 2px;">
-                                <label for="headerTextColorInput" style="font-weight: 500;">文字色:</label>
-                                <input type="color" id="headerTextColorInput" value="${settings.headerTextColor}" style="height: 35px; width: 100%; border: 1px solid #ccc; padding: 2px;">
-                                <label for="headerStrokeColorInput" style="font-weight: 500;">文字枠線色:</label>
-                                <input type="color" id="headerStrokeColorInput" value="${settings.headerStrokeColor}" style="height: 35px; width: 100%; border: 1px solid #ccc; padding: 2px;">
+            <div id="custom-settings-modal" class="modern-modal-overlay">
+                <div id="custom-settings-content" class="modern-modal-content">
+                    <div class="modern-modal-header">
+                        <h4>Moodle Customizer</h4>
+                        <p class="sub-text">Personalize your learning environment</p>
+                    </div>
+                    
+                    <div class="modern-modal-body">
+                        <div class="settings-group">
+                            <div class="group-title">Header Style</div>
+                            <div class="color-picker-grid">
+                                <div class="color-item">
+                                    <label>背景色</label>
+                                    <div class="color-wrapper"><input type="color" id="headerBgColorInput" value="${settings.headerBgColor}"></div>
+                                </div>
+                                <div class="color-item">
+                                    <label>文字色</label>
+                                    <div class="color-wrapper"><input type="color" id="headerTextColorInput" value="${settings.headerTextColor}"></div>
+                                </div>
+                                <div class="color-item">
+                                    <label>枠線色</label>
+                                    <div class="color-wrapper"><input type="color" id="headerStrokeColorInput" value="${settings.headerStrokeColor}"></div>
+                                </div>
                             </div>
-                        </fieldset>
+                        </div>
 
-                        <fieldset style="border: 1px solid #ccc; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
-                            <legend style="font-weight: bold; padding: 0 10px; width: auto; margin-left: -5px;">ページ背景設定 (画像/動画)</legend>
+                        <div class="settings-group">
+                            <div class="group-title">Background Media</div>
                             <input type="file" id="backgroundFileInput" accept="image/*,video/*" style="display: none;">
-                            <button id="selectBackgroundBtn" style="padding: 8px 15px; background-color: #0062caff; color: white; border: none; border-radius: 4px; cursor: pointer; width: 100%; margin-bottom: 15px;">
-                                ファイルを選択する (IndexedDB)
-                            </button>
-                            <p id="currentBackgroundInfo" style="font-size: 0.9em; color: #6c757d;"></p>
-                            <p style="font-size: 0.8em; color: #6c757d; margin-top: 5px;">※画像・動画ともに大容量でも保存可能です。</p>
-                            <hr>
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px;">背景種別（現在の設定）:</label>
-                                <input type="radio" id="bg-type-video" name="bg-type" value="video" ${settings.backgroundType === 'video' ? 'checked' : ''} disabled>
-                                <label for="bg-type-video" style="margin-right: 15px;">動画</label>
-                                <input type="radio" id="bg-type-image" name="bg-type" value="image" ${settings.backgroundType === 'image' ? 'checked' : ''} disabled>
-                                <label for="bg-type-image">画像</label>
+                            <button id="selectBackgroundBtn" class="modern-btn primary-btn full-width"><i class="fa fa-folder-open"></i> ファイルを選択 (Image/Video)</button>
+                            <p id="currentBackgroundInfo" class="status-text"></p>
+                            
+                            <div class="radio-group" style="display:flex; justify-content:center; gap:20px; margin-bottom:10px;">
+                                <label class="radio-label" style="color:#ccc;">
+                                    <input type="radio" id="bg-type-video" name="bg-type" value="video" ${settings.backgroundType === 'video' ? 'checked' : ''} disabled> 動画
+                                </label>
+                                <label class="radio-label" style="color:#ccc;">
+                                    <input type="radio" id="bg-type-image" name="bg-type" value="image" ${settings.backgroundType === 'image' ? 'checked' : ''} disabled> 画像
+                                </label>
                             </div>
-                            <div style="margin-top: 20px;">
-                                <label for="opacityRange" style="display: block; margin-bottom: 5px; font-weight: bold;">背景の透明度: <span id="opacityValue">${settings.opacity}</span>%</label>
-                                <input type="range" id="opacityRange" min="0" max="100" value="${settings.opacity}" style="width: 100%;">
-                            </div>
-                            <div style="margin-top: 15px;">
-                                <label for="brightnessRange" style="display: block; margin-bottom: 5px; font-weight: bold;">背景の明度: <span id="brightnessValue">${settings.brightness}</span>%</label>
-                                <input type="range" id="brightnessRange" min="0" max="200" value="${settings.brightness}" style="width: 100%;">
-                                <small style="color: #6c757d;">(100%が標準)</small>
-                            </div>
-                        </fieldset>
 
-                        <fieldset style="border: 1px solid #ccc; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
-                            <legend style="font-weight: bold; padding: 0 10px; width: auto; margin-left: -5px;">コンテンツブロック背景設定</legend>
-                            <div style="margin-top: 15px;">
-                                <label for="contentOpacityRange" style="display: block; margin-bottom: 5px; font-weight: bold;">ブロックの透明度: <span id="contentOpacityValue">${settings.contentOpacity}</span>%</label>
-                                <input type="range" id="contentOpacityRange" min="0" max="100" value="${settings.contentOpacity}" style="width: 100%;">
-                                <small style="color: #6c757d;">(0%で完全透明、100%で白が不透明)</small>
+                            <div class="slider-container">
+                                <div class="slider-label">
+                                    <span>透明度</span>
+                                    <div class="slider-value-group">
+                                        <span id="opacityValue">${settings.opacity}</span>%
+                                    </div>
+                                </div>
+                                <input type="range" id="opacityRange" min="0" max="100" value="${settings.opacity}" class="modern-range">
                             </div>
-                        </fieldset>
+                            <div class="slider-container">
+                                <div class="slider-label">
+                                    <span>明度</span>
+                                    <div class="slider-value-group">
+                                        <span id="brightnessValue">${settings.brightness}</span>%
+                                    </div>
+                                </div>
+                                <input type="range" id="brightnessRange" min="0" max="200" value="${settings.brightness}" class="modern-range">
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="group-title">Typography</div>
+                            <div class="input-wrapper">
+                                <label>プリセットフォント</label>
+                                <select id="fontFamilySelect" class="modern-select">
+                                    <option value="default">Moodle標準 (Default)</option>
+                                    <option disabled>--- System Fonts ---</option>
+                                    <option value="meiryo">メイリオ</option>
+                                    <option value="yugothic">游ゴシック</option>
+                                    <option value="biz-gothic">BIZ UDPゴシック</option>
+                                    <option disabled>--- Google Web Fonts ---</option>
+                                    <option value="notosans">Noto Sans JP</option>
+                                    <option value="zenmaru">Zen 丸ゴシック</option>
+                                    <option value="sawarabi">さわらび明朝</option>
+                                    <option value="mochiy">Mochiy Pop One</option>
+                                    <option value="dotgothic">DotGothic16</option>
+                                    <option value="rampart">Rampart One</option>
+                                </select>
+                            </div>
+                            <div class="input-wrapper">
+                                <label>カスタムフォント名</label>
+                                <input type="text" id="customFontNameInput" class="modern-input" placeholder="例: Impact" value="${settings.customFontName || ''}">
+                            </div>
+                            <div class="input-wrapper">
+                                <label>WebフォントURL</label>
+                                <input type="text" id="customFontUrlInput" class="modern-input" placeholder="例: https://fonts.googleapis.com/..." value="${settings.customFontUrl || ''}">
+                            </div>
+                        </div>
 
-                        <fieldset style="border: 1px solid #ccc; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
-                             <legend style="font-weight: bold; padding: 0 10px; width: auto; margin-left: -5px;">ウィジェット設定</legend>
-                             <div style="margin-bottom: 15px;">
+                        <div class="settings-group">
+                            <div class="group-title">Content Area</div>
+                            <div class="slider-container">
+                                <div class="slider-label">
+                                    <span>ブロック透明度</span>
+                                    <div class="slider-value-group">
+                                        <span id="contentOpacityValue">${settings.contentOpacity}</span>%
+                                    </div>
+                                </div>
+                                <input type="range" id="contentOpacityRange" min="0" max="100" value="${settings.contentOpacity}" class="modern-range">
+                            </div>
+                        </div>
+
+                        <div class="settings-group">
+                            <div class="group-title">Widgets</div>
+                            <label class="toggle-switch">
                                 <input type="checkbox" id="showTimetableCheckbox" ${settings.showTimetable ? 'checked' : ''}>
-                                <label for="showTimetableCheckbox" style="font-weight: bold; margin-left: 5px;">ダッシュボードにカスタム時間割を表示</label>
-                            </div>
-                        </fieldset>
-
+                                <span class="slider"></span>
+                                <span class="label-text">ダッシュボードに時間割を表示</span>
+                            </label>
+                        </div>
+                        
                         <div style="text-align: right; margin-top: 10px;">
-                            <button id="resetSettingsBtn" style="padding: 8px 15px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
-                                設定をリセット
-                            </button>
+                            <button id="resetSettingsBtn" class="modern-text-btn danger"><i class="fa fa-trash"></i> 設定を初期化</button>
                         </div>
                     </div>
-                    <div style="margin-top: 20px; text-align: right; flex-shrink: 0; border-top: 1px solid #eee; padding-top: 15px;">
-                        <button id="saveSettingsBtn" style="padding: 10px 20px; background-color: #0077ff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
-                            保存
-                        </button>
-                        <button id="closeSettingsModal" style="padding: 10px 20px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                            閉じる
-                        </button>
+
+                    <div class="modern-modal-footer">
+                        <button id="closeSettingsModal" class="modern-btn secondary-btn">閉じる</button>
+                        <button id="saveSettingsBtn" class="modern-btn primary-btn glow">保存して適用</button>
                     </div>
                 </div>
             </div>
         `;
         document.body.insertAdjacentHTML('beforeend', modalHtml);
         bindSettingsModalEvents();
+    }
+
+    // --- モダンデザイン用CSS注入 (修正版: 右寄せ強制・ブルーテーマ) ---
+    function injectModernModalStyles() {
+        const existingStyle = document.getElementById('modern-modal-css');
+        if (existingStyle) existingStyle.remove();
+
+        const style = document.createElement('style');
+        style.id = 'modern-modal-css';
+        style.innerHTML = `
+            /* オーバーレイ */
+            .modern-modal-overlay {
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background-color: rgba(0, 0, 0, 0.85);
+                z-index: 10001; display: none;
+                justify-content: center; align-items: center;
+                animation: fadeIn 0.2s ease;
+            }
+
+            /* モーダル本体 */
+            .modern-modal-content {
+                background: #1a1b20;
+                color: #e0e0e0;
+                border-radius: 12px;
+                width: 95%; max-width: 550px; max-height: 85vh;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+                border: 1px solid rgba(0, 119, 255, 0.3);
+                display: flex; flex-direction: column;
+                font-family: 'Segoe UI', sans-serif;
+                overflow: hidden;
+            }
+
+            /* ヘッダー */
+            .modern-modal-header {
+                padding: 15px 25px;
+                background: linear-gradient(90deg, rgba(0, 60, 150, 0.2) 0%, transparent 100%);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            .modern-modal-header h4 {
+                margin: 0; font-size: 1.5rem; font-weight: 700;
+                background: linear-gradient(90deg, #fff, #00d2ff);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
+            .sub-text { margin: 5px 0 0; font-size: 0.85rem; color: #8bb9d6; }
+
+            /* ボディ */
+            .modern-modal-body {
+                padding: 25px; overflow-y: auto;
+                scrollbar-width: thin; scrollbar-color: #0056b3 transparent;
+            }
+            .modern-modal-body::-webkit-scrollbar { width: 8px; }
+            .modern-modal-body::-webkit-scrollbar-thumb { background-color: #0056b3; border-radius: 4px; }
+
+            /* グループ */
+            .settings-group {
+                background: rgba(255, 255, 255, 0.02);
+                border-radius: 8px; padding: 15px; margin-bottom: 15px;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+            .group-title {
+                font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px;
+                color: #00d2ff;
+                margin-bottom: 10px; font-weight: 600;
+            }
+
+            /* 入力系 */
+            .input-wrapper { margin-bottom: 15px; }
+            .input-wrapper label { display: block; font-size: 0.9rem; margin-bottom: 5px; color: #ccc; }
+            .modern-input, .modern-select {
+                width: 100%; padding: 8px 12px; background: #0f1012;
+                border: 1px solid #333; border-radius: 6px; color: #fff; transition: border-color 0.2s;
+            }
+            .modern-input:focus, .modern-select:focus { outline: none; border-color: #0077ff; background: #000; }
+            .modern-select option { background-color: #1f2937; color: #fff; }
+
+            /* カラーピッカー */
+            .color-picker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+            .color-item { text-align: center; }
+            .color-item label { font-size: 0.75rem; display: block; margin-bottom: 5px; color: #aaa; }
+            .color-wrapper { height: 35px; border-radius: 6px; overflow: hidden; border: 1px solid #444; cursor: pointer; }
+            input[type="color"] { width: 100%; height: 100%; padding: 0; border: none; background: none; cursor: pointer; transform: scale(1.5); }
+
+            /* ▼▼▼ ここが修正の肝：スライダーラベルのスタイル強化 ▼▼▼ */
+            .slider-container { margin-top: 15px; }
+            
+            .slider-label { 
+                display: flex; 
+                justify-content: space-between; 
+                align-items: center;
+                font-size: 0.85rem; 
+                color: #ddd; 
+                margin-bottom: 8px; 
+                width: 100%; /* 幅を確保 */
+            }
+            
+            /* 数値と%をまとめるラッパー */
+            .slider-value-group {
+                display: inline-flex;
+                align-items: center;
+                justify-content: flex-end;
+                gap: 2px; /* 数字と%の間隔 */
+                font-family: monospace; /* 数字の幅を揃える */
+                font-size: 1.1em; /* 少し大きく */
+                color: #00d2ff; /* 青色にして強調 */
+            }
+            /* ▲▲▲ 修正ここまで ▲▲▲ */
+
+            .modern-range {
+                -webkit-appearance: none; width: 100%; height: 4px; background: #333; border-radius: 2px; outline: none;
+            }
+            .modern-range::-webkit-slider-thumb {
+                -webkit-appearance: none; width: 16px; height: 16px; background: #0077ff; border-radius: 50%; cursor: pointer;
+                box-shadow: 0 0 8px rgba(0, 119, 255, 0.5); transition: transform 0.1s;
+            }
+            .modern-range::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+            /* フッター・ボタン */
+            .modern-modal-footer {
+                padding: 15px 25px; background: rgba(0,0,0,0.3); border-top: 1px solid rgba(255,255,255,0.05);
+                display: flex; justify-content: flex-end; gap: 10px;
+            }
+            .modern-btn { padding: 8px 20px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
+            .primary-btn { background: linear-gradient(135deg, #0062ff 0%, #00b7ff 100%); color: white; }
+            .primary-btn:hover { filter: brightness(1.1); }
+            .secondary-btn { background: #333; color: #ccc; }
+            .secondary-btn:hover { background: #444; color: #fff; }
+            .full-width { width: 100%; margin-bottom: 10px; text-align: center; }
+            .modern-text-btn { background: none; border: none; cursor: pointer; font-size: 0.85rem; padding: 5px; border-radius: 4px; }
+            .modern-text-btn.danger { color: #ff4d4d; }
+            
+            .status-text { font-size: 0.8rem; color: #aaa; margin-bottom: 15px; text-align: center; }
+
+            /* トグル */
+            .toggle-switch { display: flex; align-items: center; cursor: pointer; user-select: none; }
+            .toggle-switch input { display: none; }
+            .toggle-switch .slider { width: 36px; height: 20px; background-color: #444; border-radius: 20px; position: relative; margin-right: 10px; }
+            .toggle-switch .slider:before { content: ""; position: absolute; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: .2s; }
+            .toggle-switch input:checked + .slider { background-color: #0077ff; }
+            .toggle-switch input:checked + .slider:before { transform: translateX(16px); }
+            .toggle-switch .label-text { color: #ddd; font-size: 0.9rem; }
+
+            @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        `;
+        document.head.appendChild(style);
     }
 
     function loadSettingsToForm(settings) {
@@ -446,11 +591,15 @@
         document.getElementById('showTimetableCheckbox').checked = settings.showTimetable;
         document.getElementById('contentOpacityRange').value = settings.contentOpacity;
         document.getElementById('contentOpacityValue').textContent = settings.contentOpacity;
+
+        // フォント設定
+        document.getElementById('fontFamilySelect').value = settings.fontFamily || 'default';
+        document.getElementById('customFontNameInput').value = settings.customFontName || '';
+        document.getElementById('customFontUrlInput').value = settings.customFontUrl || ''; // URLもロード
     }
 
     // 背景プレビューの適用
     function applyBackgroundPreview() {
-        // フォーム要素を関数内で取得
         const opacityRange = document.getElementById('opacityRange');
         const brightnessRange = document.getElementById('brightnessRange');
         
@@ -486,6 +635,11 @@
         const brightnessRange = document.getElementById('brightnessRange');
         const contentOpacityRange = document.getElementById('contentOpacityRange');
         
+        // フォント
+        const fontSelect = document.getElementById('fontFamilySelect');
+        const customFontInput = document.getElementById('customFontNameInput');
+        const customFontUrlInput = document.getElementById('customFontUrlInput');
+        
         // ファイル
         const fileInput = document.getElementById('backgroundFileInput');
         const selectFileBtn = document.getElementById('selectBackgroundBtn');
@@ -515,6 +669,20 @@
              });
         }
         
+        // フォントプレビュー
+        function applyFontPreview() {
+            applyFontStyle({
+                ...currentSettings,
+                fontFamily: fontSelect.value,
+                customFontName: customFontInput.value,
+                customFontUrl: customFontUrlInput.value
+            });
+        }
+        if (fontSelect) fontSelect.addEventListener('change', applyFontPreview);
+        if (customFontInput) customFontInput.addEventListener('input', applyFontPreview);
+        if (customFontUrlInput) customFontUrlInput.addEventListener('input', applyFontPreview);
+
+        
         // ファイルリスナー
         if (selectFileBtn) {
             selectFileBtn.addEventListener('click', () => {
@@ -543,7 +711,12 @@
                     opacity: parseInt(opacityRange.value),
                     brightness: parseInt(brightnessRange.value),
                     showTimetable: document.getElementById('showTimetableCheckbox').checked,
-                    contentOpacity: parseInt(contentOpacityRange.value)
+                    contentOpacity: parseInt(contentOpacityRange.value),
+                    
+                    // フォント設定保存
+                    fontFamily: document.getElementById('fontFamilySelect').value,
+                    customFontName: document.getElementById('customFontNameInput').value,
+                    customFontUrl: document.getElementById('customFontUrlInput').value
                 };
                 
                 await saveSettings(newSettings);
@@ -557,6 +730,7 @@
                 applyHeaderStyles(settings); 
                 applyBackgroundStyle(settings);
                 applyContentOpacityStyle(settings.contentOpacity);
+                applyFontStyle(settings); // フォントも元に戻す
                 modal.style.display = 'none';
             });
         }
@@ -568,14 +742,13 @@
                        currentBG_BlobUrl = null;
                     }
                     try {
-                        // DBが初期化されているか確認
+                        localStorage.removeItem(FONT_CACHE_KEY);
+                        
                         if (db) {
                             const transaction = db.transaction([STORE_NAME], 'readwrite');
                             const store = transaction.objectStore(STORE_NAME);
                             store.clear();
                         } else {
-                            // DBがまだない場合は、開いてからクリア（または何もしない）
-                            console.warn("DB not initialized during reset, attempting to open and clear.");
                             await setupIndexedDB();
                             if(db) {
                                 const transaction = db.transaction([STORE_NAME], 'readwrite');
@@ -640,16 +813,107 @@
 
         const settings = currentSettings;
         
+        // フォント適用
+        applyFontStyle(settings);
+
         injectBackgroundElements(); 
         applyHeaderStyles(settings); 
         applyBackgroundStyle(settings);
         applyContentOpacityStyle(settings.contentOpacity);
-        await renderTimetableWidget(); // ◀ ここではまず「期限なし」で時間割を描画
-        
-        // Quiz Retake Feature
-        if (document.URL.includes('/mod/quiz/review.php')) {
-            initQuizRetakeFeature();
+        await renderTimetableWidget(); 
+    }
+
+   // --- 機能: フォント適用関数 ---
+    function applyFontStyle(settings) {
+        let fontStyle = document.getElementById('custom-font-style');
+        if (!fontStyle) {
+            fontStyle = document.createElement('style');
+            fontStyle.id = 'custom-font-style';
+            (document.head || document.documentElement).appendChild(fontStyle);
         }
+
+        // フォント定義マップ
+        const fontMap = {
+            "default": { name: "", url: "" }, 
+            "meiryo": { name: '"Meiryo", "メイリオ", "Hiragino Kaku Gothic ProN", sans-serif', url: "" },
+            "yugothic": { name: '"Yu Gothic", "游ゴシック", "YuGothic", sans-serif', url: "" },
+            "biz-gothic": { name: '"BIZ UDPGothic", "BIZ UDPゴシック", sans-serif', url: "" },
+            "notosans": { name: '"Noto Sans JP", sans-serif', url: "https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" },
+            "zenmaru": { name: '"Zen Maru Gothic", sans-serif', url: "https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap" },
+            "sawarabi": { name: '"Sawarabi Mincho", serif', url: "https://fonts.googleapis.com/css2?family=Sawarabi+Mincho&display=swap" },
+            "dotgothic": { name: '"DotGothic16", sans-serif', url: "https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" },
+            "mochiy": { name: '"Mochiy Pop One", sans-serif', url: "https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&display=swap" },
+            "rampart": { name: '"Rampart One", cursive', url: "https://fonts.googleapis.com/css2?family=Rampart+One&display=swap" },
+            "antique": { name: '"Zen Antique Soft", sans-serif', url: "https://fonts.googleapis.com/css2?family=Kiwi+Maru&family=Monomaniac+One&family=RocknRoll+One&family=Zen+Antique+Soft&display=swap" },
+            "RocknRoll": { name: '"RocknRoll One", sans-serif', url: "https://fonts.googleapis.com/css2?family=Kiwi+Maru&family=Monomaniac+One&family=RocknRoll+One&family=Zen+Antique+Soft&display=swap" }
+        };
+
+        let selectedFontFamily = "";
+        let importUrl = "";
+
+        // 1. カスタム入力があれば最優先
+        if (settings.customFontName && settings.customFontName.trim() !== "") {
+            selectedFontFamily = `"${settings.customFontName}", sans-serif`;
+            if (settings.customFontUrl && settings.customFontUrl.trim() !== "") {
+                importUrl = settings.customFontUrl;
+            }
+        } 
+        // 2. プリセット選択
+        else if (fontMap[settings.fontFamily]) {
+            selectedFontFamily = fontMap[settings.fontFamily].name;
+            importUrl = fontMap[settings.fontFamily].url;
+        }
+
+        let cssContent = "";
+
+        // ▼▼▼ 変更点1: フォントがある場合のみ、全体のフォントCSSを追加 ▼▼▼
+        // (以前はここで return していたため、下のバッジ用CSSが適用されなかった)
+        if (selectedFontFamily) {
+            if (importUrl) {
+                cssContent += `@import url('${importUrl}');\n`;
+            }
+            cssContent += `
+                body, div, p, span, a, li, td, th, h1, h2, h3, h4, h5, h6, button, input, textarea, select, .block, .card {
+                    font-family: ${selectedFontFamily} !important;
+                }
+                /* アイコンフォント保護 */
+                .fa, .fa-*, .icon, [class*="icon"], .fa-solid, .fa-regular, .fa-brands {
+                    font-family: "FontAwesome", "Font Awesome 6 Free", "Font Awesome 6 Brands" !important;
+                }
+            `;
+        }
+
+        cssContent += `
+           .count-container, 
+            .badge, 
+            .notification-count,
+            [data-region="count-container"] {
+                font-family: -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif !important;
+                font-weight: bold !important;
+                font-size: 10px !important;
+                line-height: 16px !important;     /* ここを1.2から16pxに変更（高さと合わせて垂直中央揃えを確実に） */
+                letter-spacing: 0.5px !important; /* 少し文字間隔を広げてつぶれ防止 */
+                text-shadow: none !important;     /* 影を消してクッキリさせる */
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                min-width: 16px !important;
+                height: 16px !important;
+                padding: 0 4px !important;        /* パディングを微調整 */
+                border-radius: 10px !important;   /* 完全な丸みに */
+                box-sizing: border-box !important;
+            }
+
+            /* 通知0件の非表示対応 */
+            .count-container.hidden,
+            [data-region="count-container"].hidden,
+            .notification-count.hidden,
+            .count-container:empty {
+                display: none !important;
+            }
+        `;
+
+        fontStyle.innerHTML = cssContent;
     }
 
     function applyHeaderStyles(settings) {
@@ -657,7 +921,7 @@
         if (!headerStyle) {
             headerStyle = document.createElement('style');
             headerStyle.id = 'custom-header-style';
-            document.head.appendChild(headerStyle);
+            (document.head || document.documentElement).appendChild(headerStyle);
         }
 
         const textShadow = `
@@ -681,16 +945,13 @@
                 text-shadow: none !important;
             }
             
-            /* ★ GitHub Button V2 ヘッダー色連携 (文字潰れ対策) ★ */
             button.github-btn-mangesh636 {
                  color: ${settings.headerTextColor} !important;
                  border: 1px solid ${settings.headerTextColor} !important;
-                 /* text-shadow: ${textShadow}; */ /* ← 文字潰れの原因になるため削除 */
             }
             button.github-btn-mangesh636 svg {
                  fill: ${settings.headerTextColor} !important;
             }
-            /* ホバー時は StaticStyles の :hover が優先される */
         `;
     }
 
@@ -700,38 +961,39 @@
         const imageContainer = document.getElementById('background-image-container');
         const body = document.querySelector(BODY_SELECTOR);
 
-        if (!body || !video || !imageContainer) return;
+        if (!body) return; 
 
         body.style.overflowX = 'hidden';
         const opacityValue = settings.opacity / 100;
         const brightnessValue = settings.brightness / 100;
 
-        if (settings.backgroundType === 'video' && settings.backgroundUrl) {
-            video.src = settings.backgroundUrl;
-            video.style.display = 'block';
-            video.style.opacity = opacityValue.toString();
-            video.style.filter = `brightness(${brightnessValue})`;
-            imageContainer.style.display = 'none';
-            imageContainer.style.backgroundImage = 'none';
-        } else if (settings.backgroundType === 'image' && settings.backgroundUrl) {
-            imageContainer.style.backgroundImage = `url("${settings.backgroundUrl}")`;
-            imageContainer.style.display = 'block';
-            imageContainer.style.opacity = opacityValue.toString();
-            imageContainer.style.filter = `brightness(${brightnessValue})`;
-            video.style.display = 'none';
-            video.src = '';
-        } else {
-            video.style.display = 'none';
-            video.src = '';
-            imageContainer.style.display = 'none';
-            imageContainer.style.backgroundImage = 'none';
+        if (video && imageContainer) {
+            if (settings.backgroundType === 'video' && settings.backgroundUrl) {
+                video.src = settings.backgroundUrl;
+                video.style.display = 'block';
+                video.style.opacity = opacityValue.toString();
+                video.style.filter = `brightness(${brightnessValue})`;
+                imageContainer.style.display = 'none';
+                imageContainer.style.backgroundImage = 'none';
+            } else if (settings.backgroundType === 'image' && settings.backgroundUrl) {
+                imageContainer.style.backgroundImage = `url("${settings.backgroundUrl}")`;
+                imageContainer.style.display = 'block';
+                imageContainer.style.opacity = opacityValue.toString();
+                imageContainer.style.filter = `brightness(${brightnessValue})`;
+                video.style.display = 'none';
+                video.src = '';
+            } else {
+                video.style.display = 'none';
+                video.src = '';
+                imageContainer.style.display = 'none';
+                imageContainer.style.backgroundImage = 'none';
+            }
         }
     }
 
     function injectBackgroundElements() {
         if (!document.querySelector(BODY_SELECTOR)) return;
 
-        // 動画要素
         if (!document.getElementById('background-video')) {
             const video = document.createElement('video');
             video.id = 'background-video';
@@ -749,14 +1011,10 @@
             video.onerror = (e) => {
                 if (currentSettings.backgroundUrl.startsWith('blob:') && currentSettings.backgroundType === 'video') {
                     console.error("Failed to load background VIDEO (Blob/IndexedDB).", e);
-                    if(video.error) {
-                        alert(`動画の読み込みに失敗。\nエラーコード: ${video.error.code}\n理由: ${video.error.message}\n\nブラウザがこの動画形式をサポートしていない可能性があります。`);
-                    }
                 }
             };
         }
 
-        // 画像コンテナ要素
         if (!document.getElementById('background-image-container')) {
             const imageContainer = document.createElement('div');
             imageContainer.id = 'background-image-container';
@@ -777,15 +1035,9 @@
         if (!contentStyle) {
             contentStyle = document.createElement('style');
             contentStyle.id = 'custom-content-style';
-            document.head.appendChild(contentStyle);
+            (document.head || document.documentElement).appendChild(contentStyle);
         }
 
-        // 基準色は「白」 (255, 255, 255)
-        const baseR = 255;
-        const baseG = 255;
-        const baseB = 255;
-
-        // 時間割ウィジェットは少し濃くする
         const widgetOpacity = Math.min(opacityRatio + 0.2, 1.0); 
 
       contentStyle.innerHTML = `
@@ -801,25 +1053,15 @@
         `;
     }
 
-    // ★★★ カウントダウン機能 ここから ★★★
 
-    /**
-     * ヘルパー関数: コース名を正規化（比較用）
-     * - 全角/半角のスペースを削除
-     * - 全角英数字/記号を半角に (NFKC正規化)
-     * - 教員名（括弧）を削除
-     */
     function normalizeCourseName(name) {
         if (typeof name !== 'string') return '';
         return name
-            .normalize('NFKC') // 全角英数字・記号を半角に (例: Ⅱ -> II, Ⅰ -> I, スペース -> 半角スペース)
-            .replace(/\s| /g, '') // 全てのスペースを削除
-            .replace(/（.*）$|\(.*\)$/, ''); // 末尾の括弧（教員名）を削除
+            .normalize('NFKC') 
+            .replace(/\s| /g, '') 
+            .replace(/（.*）$|\(.*\)$/, ''); 
     }
 
-    /**
-     * ヘルパー関数: 残り秒数をフォーマット
-     */
     function formatRemainingTime(seconds) {
         if (seconds <= 0) {
             return '<span style="color: #6c757d; font-weight: bold;">[ 期限切れ ]</span>';
@@ -831,39 +1073,33 @@
         const s = Math.floor(seconds % 60);
 
         let parts = [];
-        let color = '#333'; // デフォルト色
+        let color = '#333';
 
         if (d > 0) {
-            // 1日以上ある場合 (日・時間・分)
             parts.push(`<b>${d}</b>日`);
             parts.push(`<b>${h}</b>時間`);
             parts.push(`<b>${m}</b>分`);
-            if (d <= 3) color = '#E67E22'; // 3日以内はオレンジ
+            if (d <= 3) color = '#E67E22'; 
         } else if (h > 0) {
-            // 1時間以上、1日未満 (時間・分・秒)
             parts.push(`<b>${h}</b>時間`);
             parts.push(`<b>${m}</b>分`);
             parts.push(`<b>${s}</b>秒`);
-            color = '#E67E22'; // オレンジ
+            color = '#E67E22'; 
         } else { 
-            // 1時間未満 (分・秒)
             parts.push(`<b>${m}</b>分`);
             parts.push(`<b>${s}</b>秒`);
-            color = '#dc3545'; // 1時間切ったら赤
+            color = '#dc3545'; 
         }
 
         return `<span style="color: ${color}; font-weight: bold; font-size: 0.95em;">あと ${parts.join(' ')}</span>`;
     }
     
-    /**
-     * ★ ヘルパー関数: すべてのタイマー表示を1回更新する
-     */
     function updateAllCountdownTimers() {
         const countdownElements = document.querySelectorAll('.custom-countdown-timer');
         const nowSeconds = Math.floor(Date.now() / 1000);
 
         if (countdownElements.length === 0 && countdownTimerInterval) {
-            clearInterval(countdownTimerInterval); // ページにタイマーがなくなったら停止
+            clearInterval(countdownTimerInterval); 
             countdownTimerInterval = null;
             return;
         }
@@ -874,64 +1110,42 @@
 
             const remainingSeconds = dueTimestamp - nowSeconds;
             
-            // 1日以上ある場合は、毎秒描画しなくても良い (負荷対策)
-            // ★ ただし、初回描画(innerHTMLが空)の場合は必ず描画する
-            if (remainingSeconds > 86400 && el.innerHTML !== '') { // 1日以上
-                if (nowSeconds % 60 === 0) { // 1分に1回だけ描画
+            if (remainingSeconds > 86400 && el.innerHTML !== '') { 
+                if (nowSeconds % 60 === 0) { 
                      el.innerHTML = formatRemainingTime(remainingSeconds);
                 }
-            } else { // 1日切ったら毎秒描画（危機感！）
+            } else { 
                 el.innerHTML = formatRemainingTime(remainingSeconds);
             }
         });
     }
     
-    /**
-     * メイン機能: カウントダウンタイマーを開始・更新
-     * (★ 修正：即時実行を追加)
-     */
     function startCountdownTimers() {
-        // 既存のタイマーがあれば停止
         if (countdownTimerInterval) {
             clearInterval(countdownTimerInterval);
         }
-
-        // ★ 1. まず1回、すぐに実行する
         updateAllCountdownTimers();
-
-        // ★ 2. 1秒ごとに更新タイマーをセット
         countdownTimerInterval = setInterval(updateAllCountdownTimers, 1000);
     }
 
-    // ★★★ カウントダウン機能 ここまで ★★★
 
-
-    // --- ★ 機能: 期限タイムラインのパース (修正版) ---
-    /**
-     * 機能: タイムライン（期限）情報のパース
-     * (POLITEのHTML構造に合わせてセレクタを修正)
-     * タイムラインから「コース名」「課題名」「期限日時」を取得する
-     */
+    // --- 機能: 期限タイムラインのパース ---
     function parseTimelineDeadlines() {
-        timelineDeadlines = []; // 毎回初期化
+        timelineDeadlines = []; 
         
-        // ダッシュボード（/my/）か確認
         if (!document.URL.includes('/my/')) return;
         const timelineBlock = document.querySelector('.block_timeline');
         if (!timelineBlock) return;
 
-        // 日付グループ (例: "11月 4日(火曜日)")
         const dateGroups = timelineBlock.querySelectorAll('[data-region="event-list-content-date"]');
         
         const now = new Date();
         const currentYear = now.getFullYear();
 
         dateGroups.forEach(dateGroup => {
-            // data-timestamp はその日の 00:00 のタイムスタンプ（秒）
             const dateTimestampSeconds = parseInt(dateGroup.getAttribute('data-timestamp'));
             const baseDate = new Date(dateTimestampSeconds * 1000);
             
-            // 日付グループの直後にあるイベントリスト
             const eventList = dateGroup.nextElementSibling;
             if (!eventList) return;
 
@@ -939,31 +1153,26 @@
             
             items.forEach(item => {
                 try {
-                    // 1. "小テスト の受験可能期間の終了 · ネットワークとセキュリティI（尾崎）" などのテキストを取得
                     const infoTextElement = item.querySelector('.event-name-container small.mb-0');
-                    if (!infoTextElement) return; // 期限情報でなければ次へ
+                    if (!infoTextElement) return; 
 
                     const infoText = infoTextElement.textContent || '';
                     
-                    // 2. 期限を示すイベントか判定
                     const isDue = infoText.includes('due') || infoText.includes('closes') ||
                                   infoText.includes('提出期限') || infoText.includes('終了');
                     
-                    if (!isDue) return; // 期限でないイベントはスキップ
+                    if (!isDue) return; 
 
-                    // 3. 課題名の取得 (リンクになっているテキスト)
                     const assignmentLink = item.querySelector('.event-name-container a');
                     const assignmentName = assignmentLink?.textContent.trim();
                     
-                    if (!assignmentName) return; // 課題名がなければスキップ
+                    if (!assignmentName) return; 
 
-                    // 4. コース名の取得 ( "·" の後ろのテキスト)
                     const courseNameMatch = infoText.match(/·\s*(.*)/);
                     const courseName = courseNameMatch ? courseNameMatch[1].trim() : null;
 
-                    if (!courseName) return; // コース名がなければスキップ
+                    if (!courseName) return; 
 
-                    // 5. 時刻 (HH:mm) のパース ( "14:35" の部分)
                     const timeText = item.querySelector('.timeline-name > small.text-nowrap')?.textContent || '';
                     const timeMatch = timeText.match(/(\d{1,2}):(\d{2})/);
                     
@@ -973,11 +1182,9 @@
                         minutes = parseInt(timeMatch[2]);
                     }
 
-                    // 6. 最終的な期限日時のタイムスタンプを計算
                     const dueDateTime = new Date(baseDate.getTime());
                     dueDateTime.setHours(hours, minutes, 0, 0);
                     
-                    // 年越し対応
                     if (dueDateTime.getMonth() < now.getMonth() - 6) { 
                          dueDateTime.setFullYear(currentYear + 1);
                     } else {
@@ -985,16 +1192,13 @@
                     }
 
                     const dueTimestamp = Math.floor(dueDateTime.getTime() / 1000);
-                    
-                    // 7. 表示用文字列の生成
                     const dueDateString = `${dueDateTime.getMonth() + 1}月${dueDateTime.getDate()}日 ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
                     
-                    // 8. 配列に追加 (courseId の代わりに courseName を保存)
                     timelineDeadlines.push({
-                        courseName: courseName, // 照合用のコース名 (String)
-                        assignmentName: assignmentName, // 課題名
-                        dueTimestamp: dueTimestamp, // ソート用のタイムスタンプ
-                        dueDateString: dueDateString // 表示用の日時文字列
+                        courseName: courseName, 
+                        assignmentName: assignmentName, 
+                        dueTimestamp: dueTimestamp, 
+                        dueDateString: dueDateString 
                     });
 
                 } catch (e) {
@@ -1002,8 +1206,34 @@
                 }
             });
         });
+    }
 
-        // console.log("Parsed Deadlines:", timelineDeadlines); // デバッグ時はこの行を有効化
+    // --- ★★★ 新しいポーリング関数 ★★★
+    function startTimelinePoller() {
+        if (timelinePoller) {
+            clearInterval(timelinePoller);
+        }
+        pollAttempts = 0;
+
+        timelinePoller = setInterval(async () => {
+            pollAttempts++;
+            const timelineContent = document.querySelector('.block_timeline [data-region="event-list-content-date"]');
+            
+            if (timelineContent) {
+                clearInterval(timelinePoller); 
+                timelinePoller = null;
+
+                parseTimelineDeadlines(); 
+                applyDeadlineHighlight();
+
+                if (timelineDeadlines.length > 0) {
+                    await renderTimetableWidget(); 
+                }
+            } else if (pollAttempts > MAX_POLL_ATTEMPTS) {
+                clearInterval(timelinePoller);
+                timelinePoller = null;
+            }
+        }, 200); 
     }
 
     // --- 機能: 時間割 (Timetable Feature) ---
@@ -1033,13 +1263,8 @@
 
             const cardBody = widgetContainer.querySelector('.card-body');
             if (cardBody) {
-                // ★ timelineDeadlines を引数として渡す
                 cardBody.innerHTML = generateWeeklyTimetableHtml(timetable, timelineDeadlines);
-                
-                // ★★★ カウントダウンタイマーを起動 ★★★
-                // (HTMLの描画が終わった直後に呼び出す)
                 startCountdownTimers(); 
-                // ★★★★★★★★★★★★★★★★★★
                 
                 const editBtn = document.getElementById('editTimetableBtn');
                 if (editBtn) {
@@ -1070,12 +1295,10 @@
             try {
                 timetable = JSON.parse(stored);
             } catch (e) {
-                console.error("時間割データのパースに失敗。デフォルトを使用します。", e);
                 timetable = DEFAULT_TIMETABLE;
             }
         } else {
             timetable = DEFAULT_TIMETABLE;
-            // デフォルトを保存
             chrome.storage.local.set({ [TIMETABLE_STORAGE_KEY]: JSON.stringify(DEFAULT_TIMETABLE) });
         }
         return timetable;
@@ -1100,7 +1323,6 @@
             }
         }
         
-        // 休み時間の判定を修正
         for (let i = 0; i < CLASS_TIMES.length - 1; i++) {
             if (currentTime > CLASS_TIMES[i].end && currentTime < CLASS_TIMES[i+1].start) {
                 return { periodNumber: null, status: '休み時間' };
@@ -1110,7 +1332,6 @@
         return { periodNumber: null, status: '授業時間外' };
     }
 
-    // ★ 引数に deadlines を追加 (正規化比較・カウントダウン対応バージョン)
     function generateWeeklyTimetableHtml(timetable, deadlines) {
         const today = new Date();
         const currentDayName = DAY_MAP[today.getDay()];
@@ -1157,34 +1378,28 @@
                 if (course) {
                     htmlContent += `<a href="${createCourseDirectUrl(course.id)}" target="_self" style="color: #007bff; text-decoration: none;">${course.name}</a>`;
 
-                    // ★★★ ここが最終修正箇所 ★★★
-                    
-                    // 1. タイムラインと時間割のコース名を両方「正規化」して比較
                     const normalizedTimetableName = normalizeCourseName(course.name);
 
                     const relevantDeadlines = deadlines
                         .filter(d => {
                             const normalizedDeadlineName = normalizeCourseName(d.courseName);
-                            // タイムライン側の名前(正規化) が 時間割側の名前(正規化) を含んでいれば true
                             return normalizedDeadlineName.includes(normalizedTimetableName);
                         })
-                        .sort((a, b) => a.dueTimestamp - b.dueTimestamp); // 期限が近い順にソート
+                        .sort((a, b) => a.dueTimestamp - b.dueTimestamp); 
 
-                    // 2. 関連する期限が1件でもあればリスト(ul)を生成
                     if (relevantDeadlines.length > 0) {
                         htmlContent += `
                             <ul style="
                                 font-size: 0.85em; 
-                                color: #dc3545; /* 赤色 */
+                                color: #dc3545;
                                 margin: 5px 0 0 10px; 
                                 padding-left: 10px; 
-                                list-style-type: '!! '; /* リストマーカー */
+                                list-style-type: '!! ';
                                 line-height: 1.4;
                                 font-weight: 500;
                             ">
                         `;
                         
-                        // 3. 期限をリストアイテム(li)として追加
                         relevantDeadlines.forEach(deadline => {
                             htmlContent += `<li>
                                 <b>${deadline.assignmentName}</b>
@@ -1201,7 +1416,6 @@
                         
                         htmlContent += '</ul>';
                     }
-                    // ★★★ 修正ロジックここまで ★★★
 
                 } else {
                     htmlContent += `<span style="color: #6c757d;">-</span>`;
@@ -1220,7 +1434,7 @@
     }
 
     function generateEditModalHtml(timetable) {
-        const days = DAY_MAP.slice(1, 6); // 月〜金
+        const days = DAY_MAP.slice(1, 6); 
         const periods = CLASS_TIMES.map(t => t.period.toString());
         let bodyHtml = `
             <p style="margin-bottom: 15px;">科目名とMoodleのコースIDを入力してください。（IDはURL <code>course/view.php?id=XXX</code> のXXX部分です）</p>
@@ -1281,7 +1495,7 @@
     }
 
     async function saveAndRenderTimetable() {
-        const days = DAY_MAP.slice(1, 6); // 月〜金
+        const days = DAY_MAP.slice(1, 6); 
         const periods = CLASS_TIMES.map(t => t.period.toString());
         let newTimetable = {};
 
@@ -1291,16 +1505,14 @@
                 const nameInput = document.getElementById(`name-${day}-${period}`);
                 const idInput = document.getElementById(`id-${day}-${period}`);
                 const name = nameInput ? nameInput.value.trim() : '';
-                const id = idInput ? idInput.value.trim() : ''; // valueをそのまま取得
+                const id = idInput ? idInput.value.trim() : ''; 
 
-                // idが空でなく、かつ数値に変換可能（または数値）であることを確認
                 if (name && id && !isNaN(parseInt(id))) {
                     newTimetable[day][period] = { name, id: parseInt(id) };
                 }
             }
         }
         
-        // 土日もキーとして存在させておく
         newTimetable["土"] = {};
         newTimetable["日"] = {};
 
@@ -1310,7 +1522,7 @@
     }
 
 
-    // --- 機能: 期限ハイライト (Deadline Highlight) ---
+    // --- 機能: 期限ハイライト ---
     function applyDeadlineHighlight() {
         if (!document.URL.includes('/my/')) return;
         const timelineBlock = document.querySelector('.block_timeline');
@@ -1448,14 +1660,14 @@
                 border: none !important;
             }
 
-            /* ★★★ GitHub Button V2 Styles (From Uiverse.io by Mangesh636) ★★★ */
+            /* ★★★ GitHub Button V2 Styles */
             button.github-btn-mangesh636 {
               background: transparent;
               position: relative;
-              padding: 5px 10px; /* 既存のヘッダーに合わせてパディングを少し調整 */
+              padding: 5px 10px; 
               display: flex;
               align-items: center;
-              font-size: 15px; /* ヘッダーに合わせてフォントサイズを調整 */
+              font-size: 15px; 
               font-weight: 600;
               text-decoration: none;
               cursor: pointer;
@@ -1466,11 +1678,11 @@
               color: rgb(36, 41, 46);
               transition: color 0.3s 0.1s ease-out, border-color 0.3s 0.1s ease-out;
               text-align: center;
-              height: 38px; /* 高さを調整 */
+              height: 38px; 
             }
 
             button.github-btn-mangesh636 span {
-              margin: 0 5px; /* マージンを調整 */
+              margin: 0 5px; 
             }
 
             button.github-btn-mangesh636 svg {
@@ -1496,12 +1708,12 @@
             }
 
             button.github-btn-mangesh636:hover {
-              color: #fff !important; /* ホバー時は白文字 */
+              color: #fff !important; 
               border: 1px solid rgb(36, 41, 46) !important;
             }
             
             button.github-btn-mangesh636:hover svg {
-               fill: #fff !important; /* ホバー時は白アイコン */
+               fill: #fff !important; 
             }
 
             button.github-btn-mangesh636:hover::before {
@@ -1515,18 +1727,18 @@
                 padding: 20px;
                 margin-bottom: 20px;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-                position: relative; /* 終了ボタンの配置基準 */
+                position: relative; 
             }
             .retake-controls-card h4 {
                 margin-top: 0;
-                color: #005A9C; /* 落ち着いた青 */
+                color: #005A9C; 
                 font-weight: 600;
                 border-bottom: 1px solid #eee;
                 padding-bottom: 10px;
                 margin-bottom: 10px;
                 display: flex;
                 align-items: center;
-                gap: 8px; /* アイコンとテキストの間隔 */
+                gap: 8px; 
             }
             .retake-controls-card p {
                 font-size: 0.95em;
@@ -1543,18 +1755,18 @@
                 border: none;
                 border-radius: 5px;
                 cursor: pointer;
-                font-size: 0.95em; /* 少し小さく調整 */
-                font-weight: 600; /* Moodleボタンに合わせて太く */
+                font-size: 0.95em; 
+                font-weight: 600; 
                 transition: all 0.2s ease;
                 text-decoration: none;
-                display: inline-flex; /* アイコンとテキストを中央揃え */
+                display: inline-flex; 
                 align-items: center;
-                gap: 6px; /* アイコンとテキストの間隔 */
+                gap: 6px; 
                 text-align: center;
                 line-height: 1.2;
             }
             .retake-btn-primary {
-                background-color: #007bff; /* Moodleのプライマリカラー */
+                background-color: #007bff; 
                 color: white;
             }
             .retake-btn-primary:hover {
@@ -1588,37 +1800,24 @@
                 color: #333;
             }
         `;
-        document.head.appendChild(style);
+        (document.head || document.documentElement).appendChild(style);
     }
 
-    // --- 機能: 小テスト解きなおし (Quiz Retake Feature) ---
-
-    /**
-     * 1. レビューページか判定し、解きなおし機能のUIを挿入
-     */
+    // --- 機能: 小テスト解きなおし ---
    function initQuizRetakeFeature() {
-        // レビューページでない、またはボタンが既にあれば何もしない
         if (!document.URL.includes('/mod/quiz/review.php') || document.getElementById('retake-controls')) {
             return;
         }
-
-        // メインコンテンツ領域（<div role="main">）を探す
         const mainRegion = document.querySelector('#region-main > [role="main"]');
-        if (!mainRegion) {
-             console.error("Moodle main region not found for Quiz Retake feature.");
-             return;
-        }
+        if (!mainRegion) return;
         
-        // 結果表示用の div を先に追加
         const resultContainer = document.createElement('div');
         resultContainer.id = 'retake-result';
 
-        // ボタンコンテナ（カードデザイン）を作成
         const buttonContainer = document.createElement('div');
         buttonContainer.id = 'retake-controls';
-        buttonContainer.className = 'retake-controls-card'; // 新しいCSSクラスを適用
+        buttonContainer.className = 'retake-controls-card';
 
-        // --- HTML構造の変更 (v2) ---
         buttonContainer.innerHTML = `
             <button id="exitRetakeBtn" class="retake-btn-exit" title="解き直しを終了" style="display: none;">×</button>
             
@@ -1639,32 +1838,21 @@
             </div>
         `;
 
-        // メインコンテンツの先頭に挿入
         mainRegion.prepend(buttonContainer);
         mainRegion.prepend(resultContainer);
 
-        // イベントリスナーを設定
         document.getElementById('startRetakeBtn').addEventListener('click', startRetakeMode);
         document.getElementById('gradeRetakeBtn').addEventListener('click', gradeRetakeQuiz);
         document.getElementById('resetRetakeBtn').addEventListener('click', resetQuizButtons);
-        
-        // 終了ボタンのイベントリスナーを追加
         document.getElementById('exitRetakeBtn').addEventListener('click', exitRetakeMode);
     }
 
-    /**
-     * 2b. 解き直しモードの終了 (リロード版)
-     */
     function exitRetakeMode() {
         if (confirm('解き直しモードを終了しますか？\n（ページがリロードされ、元のレビュー画面に戻ります）')) {
-            // 状態を元に戻すのが複雑なため、リロードするのが最も安全で確実
             window.location.reload();
         }
     }
 
-    /**
-     * 2. ページ上の正解データを解析・保存 (★ match 問題の解析を追加)
-     */
     function parseQuizReviewAnswers() {
         quizAnswerStore.clear();
         const questions = document.querySelectorAll('div.que');
@@ -1688,7 +1876,6 @@
                 }
             } else if (q.classList.contains('truefalse')) {
                  answerData.type = 'truefalse';
-                 
                  if (rightAnswerText.includes("正解は「○」です") || rightAnswerText.toLowerCase().includes("the correct answer is 'true'")) {
                      answerData.answer = "1";
                  } else if (rightAnswerText.includes("正解は「×」です") || rightAnswerText.toLowerCase().includes("the correct answer is 'false'")) {
@@ -1718,10 +1905,8 @@
             } else if (q.classList.contains('gapselect')) {
                 answerData.type = 'gapselect';
                 const answers = {};
-                
                 const rightAnswerHTML = rightAnswerElement ? rightAnswerElement.innerHTML : '';
                 const answerMatches = [...rightAnswerHTML.matchAll(/\[([\s\S]*?)\]/g)];
-                
                 const selects = q.querySelectorAll('select');
                 
                 if (answerMatches.length > 0 && selects.length > 0) {
@@ -1734,7 +1919,6 @@
                         if (answerMatches[index] && answerMatches[index][1]) {
                             const correctText = answerMatches[index][1].replace(/<[^>]+>/g, '').trim();
                             const options = selectEl.querySelectorAll('option');
-                            
                             for (const option of options) {
                                 if (option.textContent.trim() === correctText) {
                                     correctAnswerValue = option.value;
@@ -1742,7 +1926,6 @@
                                 }
                             }
                         }
-                        
                         if (correctAnswerValue !== null) {
                             answers[selectId] = correctAnswerValue;
                         }
@@ -1751,47 +1934,28 @@
                 answerData.answer = answers;
             
             } else if (q.classList.contains('match')) {
-                // ★★★ 組み合わせ問題 (match) の解析ロジック (V3 - 複雑なHTML対応) ★★★
                 answerData.type = 'match';
                 const answers = {};
-                
-                // 1. 正解テキストからマッピングを作成
                 const textToAnswerMap = {};
                 const rightAnswerHTML = rightAnswerElement ? rightAnswerElement.innerHTML : '';
 
                 let processedHTML = rightAnswerHTML;
-                
-                // <p>, <div>, <br> タグをペアの区切り文字 '|||' に置換
                 processedHTML = processedHTML.replace(/<(p|div|br)[^>]*>/gi, '|||'); 
-                // 残りのすべてのHTMLタグを「空文字」に置換 (スペースを入れない)
                 processedHTML = processedHTML.replace(/<[^>]+>/g, ''); 
-                
-                // HTMLエンティティをデコード
                 processedHTML = processedHTML.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
 
                 const pairs = processedHTML.split('|||');
-                
                 pairs.forEach(part => {
-                    part = part.trim(); // 前後の空白を除去
-                    
-                    // "→" を含むペアを解析
+                    part = part.trim(); 
                     if (part.includes('→')) {
-                        // (Question Text) → (Answer Text) の形式でマッチ
-                        // グループ1: (.+?) - 任意の文字に非貪欲マッチ (Question Text)
-                        // グループ2: (.+) - 任意の文字に貪欲マッチ (Answer Text)
                         const match = part.match(/(.+?)\s*→\s*(.+)/);
-                        
                         if (match && match[1] && match[2]) {
                             let questionText = match[1].trim();
-                            // 解答文の末尾にある可能性のあるコンマ(,)を除去
                             let answerText = match[2].trim().replace(/,$/, '').trim(); 
-                            
                             if (questionText && answerText) {
-                                // 最初のペアに含まれる "正解:" の文字列を除去
                                 if (questionText.startsWith('正解:')) {
                                     questionText = questionText.substring(3).trim();
                                 }
-                                
                                 if(questionText) {
                                     textToAnswerMap[questionText] = answerText;
                                 }
@@ -1800,48 +1964,34 @@
                     }
                 });
                 
-                // 2. DOMを走査し、テキストに対応するselectの「正解のvalue」を保存
                 const subQuestions = q.querySelectorAll('.ablock .answer tr');
                 subQuestions.forEach(tr => {
                     const textEl = tr.querySelector('.text');
                     const selectEl = tr.querySelector('.control select');
                     if (!textEl || !selectEl) return;
 
-                    // DOMのテキストを取得
                     const questionTextDOM = textEl.textContent.trim();
-                    
-                    // textToAnswerMap から対応する正解の「文字列」を取得
                     let correctAnswserText = textToAnswerMap[questionTextDOM];
                     
                     if (!correctAnswserText) {
-                        // (デバッグ用) マップに見つからない場合はログに出力
-                        console.warn(`[Retake Mode] Match-Key not found for: "${questionTextDOM}"`);
-                        
-                        // 部分一致でのフォールバックを試みる
-                        // (DOM側のテキストがマップのキーに含まれているか、またはその逆)
                         const domKey = Object.keys(textToAnswerMap).find(key => 
                             questionTextDOM.includes(key) || key.includes(questionTextDOM)
                         );
-                        
                         if(domKey) {
                              correctAnswserText = textToAnswerMap[domKey];
-                             console.warn(`[Retake Mode] Fallback match found: "${domKey}" -> "${correctAnswserText}"`);
                         } else {
-                            return; // 該当する正解テキストが見つからない
+                            return; 
                         }
                     }
 
                     let correctValue = null;
                     const options = selectEl.querySelectorAll('option');
-                    
-                    // 3. selectのoptionを走査し、正解「文字列」に一致するoptionの「value」を探す
                     for (const option of options) {
                         if (option.textContent.trim() === correctAnswserText) {
                             correctValue = option.value;
                             break;
                         }
                     }
-
                     if (correctValue !== null) {
                         answers[selectEl.id] = correctValue;
                     }
@@ -1851,17 +2001,10 @@
 
             if (answerData.type && answerData.answer !== null && (Object.keys(answerData.answer).length > 0 || typeof answerData.answer !== 'object')) {
                 quizAnswerStore.set(qid, answerData);
-            } else {
-                 console.warn(`[Retake Mode] 問題 ${qid} の正解を解析できませんでした。 (Type: ${q.className}, AnswerText: ${rightAnswerText})`);
             }
         });
-        
-         // console.log("Retake Mode: Answers parsed and stored:", quizAnswerStore);
     }
 
-    /**
-     * 3. 解きなおしモード開始（ボタン押下時）
-     */
     function startRetakeMode() {
         if (!isRetakeMode) {
             parseQuizReviewAnswers();
@@ -1871,10 +2014,8 @@
             }
             isRetakeMode = true;
         }
-        
         retakeStartTime = new Date();
 
-        // 既存のフィードバックとアイコンを非表示
         document.querySelectorAll('.state, .grade, .outcome').forEach(el => {
             el.style.display = 'none';
         });
@@ -1897,13 +2038,11 @@
              }
         });
         
-        // ★ 組み合わせ(match)問題のアイコンも隠す
         document.querySelectorAll('div.que.match .control i.icon').forEach(icon => {
              if (!icon.classList.contains('retake-feedback-icon')) {
                 icon.style.display = 'none';
              }
         });
-
 
         resetRetakeQuiz(); 
 
@@ -1913,9 +2052,6 @@
         document.getElementById('exitRetakeBtn').style.display = 'block';
     }
 
-    /**
-     * 4. 入力欄のリセット（共通処理）
-     */
     function resetRetakeQuiz() {
         const questions = document.querySelectorAll('div.que');
         questions.forEach(q => {
@@ -1933,7 +2069,6 @@
                 }
             });
 
-            // 穴埋め(gapselect) と 組み合わせ(match) の <select> をリセット
             const allSelects = q.querySelectorAll('select');
             allSelects.forEach(selectEl => {
                 if (selectEl.name && selectEl.name.includes(':')) {
@@ -1943,7 +2078,6 @@
                 }
             });
             
-            // 採点結果の表示を隠す
             q.querySelectorAll('.state, .grade, .outcome').forEach(el => {
                  el.style.display = 'none';
                  if (el.classList.contains('state')) {
@@ -1952,19 +2086,16 @@
                  }
             });
             
-            // Moodle標準のアイコンを隠す
             q.querySelectorAll('i.fa-circle-check, i.fa-circle-xmark').forEach(icon => {
                  if (!icon.classList.contains('retake-feedback-icon')) {
                      icon.style.display = 'none';
                  }
             });
             
-            // 動的に追加したアイコンを削除
             q.querySelectorAll('.retake-feedback-icon').forEach(el => {
                  el.remove();
             });
             
-            // 数値・記述問題のアイコンをリセット
             const ablockIcon = q.querySelector('.ablock .icon');
             if (ablockIcon && (q.classList.contains('numerical') || q.classList.contains('shortanswer'))) {
                  ablockIcon.classList.remove('fa-regular', 'fa-circle-check', 'text-success', 'fa-circle-xmark', 'text-danger');
@@ -1973,7 +2104,6 @@
                  ablockIcon.setAttribute('aria-label', '');
             }
 
-            // 穴埋め(gapselect)のアイコンをリセット
             q.querySelectorAll('div.que.gapselect .qtext i.icon').forEach(icon => {
                  icon.classList.remove('fa-regular', 'fa-circle-check', 'text-success', 'fa-circle-xmark', 'text-danger');
                  icon.style.display = 'none';
@@ -1981,7 +2111,6 @@
                  icon.setAttribute('aria-label', '');
             });
             
-            // ★ 組み合わせ(match)問題のアイコンをリセット
             q.querySelectorAll('div.que.match .control i.icon').forEach(icon => {
                  icon.classList.remove('fa-regular', 'fa-circle-check', 'text-success', 'fa-circle-xmark', 'text-danger');
                  icon.style.display = 'none';
@@ -1996,23 +2125,17 @@
         retakeStartTime = new Date();
     }
 
-    /**
-     * 5. リセットボタンの処理
-     */
     function resetQuizButtons() {
         resetRetakeQuiz();
     }
 
-    /**
-     * 6. 自己採点 (★ match 問題の採点、評点バグ修正)
-     */
     function gradeRetakeQuiz() {
         let totalQuestions = 0;
         let correctAnswers = 0;
         const retakeEndTime = new Date();
         
         let totalMarks = 0;
-        let earnedMarks = 0; // 総合点
+        let earnedMarks = 0; 
 
         quizAnswerStore.forEach((correctData, qid) => {
             totalQuestions++;
@@ -2023,11 +2146,8 @@
             const outcomeEl = questionElement.querySelector('.outcome');
             const gradeEl = questionElement.querySelector('.grade');
 
-            // ★★★ 評点取得ロジック修正 ★★★
-            // 'innerText' の代わりに 'textContent' を使い、非表示要素のテキストも取得
             let maxMark = 0;
             if (gradeEl) {
-                // "3.00 / 3.00" や "18.18 / 30.00" から "30.00" の部分を取得
                 const match = gradeEl.textContent.match(/[0-9.]+\s*\/\s*([0-9.]+)/);
                 if (match && match[1]) {
                     maxMark = parseFloat(match[1]);
@@ -2035,17 +2155,15 @@
             }
             totalMarks += maxMark;
             
-            let earnedMarkForThisQ = 0; // この問題の得点
-            let isCorrect = false; // この問題全体が正解か
+            let earnedMarkForThisQ = 0; 
+            let isCorrect = false; 
             const qidParts = qid.split('-');
             if (qidParts.length < 3) return;
             const inputName = `q${qidParts[1]}:${qidParts[2]}_answer`; 
 
-            // アイコン生成
             const createIcon = (isCorrect) => {
                  const iconClass = isCorrect ? 'fa-circle-check text-success' : 'fa-circle-xmark text-danger';
                  const title = isCorrect ? '正解' : '不正解';
-                 // 'ms-1' は Moodle の標準スペーシング
                  return `<span class="ms-1 retake-feedback-icon">
                              <i class="icon fa-regular ${iconClass} fa-fw" title="${title}" role="img" aria-label="${title}"></i>
                          </span>`;
@@ -2127,7 +2245,7 @@
                 let correctGaps = 0;
                 
                 const selects = questionElement.querySelectorAll('select');
-                let relevantSelects = 0; // 問題に関連するselectの数
+                let relevantSelects = 0; 
                 
                 if (selects.length === 0) {
                     allGapsCorrect = false;
@@ -2135,7 +2253,7 @@
                 
                 selects.forEach(selectEl => {
                     if (!selectEl.name || !selectEl.name.includes(':')) {
-                        return; // 無関係なselect要素
+                        return; 
                     }
                     relevantSelects++;
 
@@ -2181,7 +2299,6 @@
                 earnedMarks += earnedMarkForThisQ;
             
             } else if (correctData.type === 'match') {
-                // ★★★ 組み合わせ問題 (match) の採点ロジック ★★★
                 let allMatchCorrect = true;
                 let correctMatches = 0;
                 
@@ -2203,13 +2320,11 @@
                         allMatchCorrect = false;
                     }
 
-                    // アイコンの挿入
                     selectEl.classList.remove('correct', 'incorrect');
                     selectEl.classList.add(isMatchCorrect ? 'correct' : 'incorrect');
                     
                     const controlCell = selectEl.closest('.control');
                     if (controlCell) {
-                         // Moodle標準の <i ...> を再利用
                          const iconElement = controlCell.querySelector('i.icon');
                          if (iconElement) {
                              iconElement.classList.remove('fa-regular', 'fa-circle-check', 'text-success', 'fa-circle-xmark', 'text-danger');
@@ -2230,14 +2345,12 @@
 
                 isCorrect = allMatchCorrect;
 
-                // 部分点計算
                 if (selects.length > 0) {
                     earnedMarkForThisQ = (maxMark * (correctMatches / selects.length));
                 }
                 earnedMarks += earnedMarkForThisQ;
             }
 
-            // --- 正解/不正解のカウント (穴埋め・組み合わせ以外) ---
             if (correctData.type !== 'gapselect' && correctData.type !== 'match') {
                 if (isCorrect) {
                     correctAnswers++;
@@ -2246,11 +2359,10 @@
                 }
             }
 
-            // --- 共通フィードバックの表示 ---
             if (stateEl) {
                 if ((correctData.type === 'gapselect' || correctData.type === 'match') && !isCorrect && earnedMarkForThisQ > 0) {
                      stateEl.textContent = '部分的に正解';
-                     stateEl.style.color = '#FF8C00'; // オレンジ色
+                     stateEl.style.color = '#FF8C00'; 
                 } else {
                     stateEl.textContent = isCorrect ? '正解' : '不正解';
                     stateEl.style.color = isCorrect ? '#28a745' : '#dc3545';
@@ -2258,7 +2370,6 @@
                 stateEl.style.display = 'block'; 
             }
             
-            // 評点 (Grade) 表示の更新
             if (gradeEl) {
                 gradeEl.innerHTML = `${earnedMarkForThisQ.toFixed(2)} / ${maxMark.toFixed(2)}`;
                 gradeEl.style.display = 'block';
@@ -2268,9 +2379,8 @@
                 outcomeEl.style.display = 'block';
             }
 
-        }); // end forEach
+        }); 
 
-        // --- 総合結果をテーブルで表示 ---
         const resultEl = document.getElementById('retake-result');
         if (resultEl) {
             
@@ -2326,7 +2436,6 @@
                 </div>
             `;
             
-            // 浮動小数点誤差を考慮
             if (Math.abs(totalMarks - earnedMarks) < 0.001) {
                 resultHTML += `<p style="color: #028dffff; font-weight: bold; font-size: 1.1em; margin-top: 1rem;">素晴らしい！全問正解です！</p>`;
             } else {
@@ -2339,12 +2448,7 @@
         }
     }
 
-    // --- 実行 ---
-    
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
+    // --- 実行 (即時実行) ---
+    init(); 
 
 })();
