@@ -10,7 +10,7 @@
     * ページの背景に好きな画像や動画（ローカルファイル）を設定
     * 背景の透明度や明るさの調整
     <p align="center">
-      <img src="assets/screenshot-05.gif" width="500">
+      <img src="assets/VIDEO1.gif" width="500">
       <br>
       <em>動画背景の設定デモ</em>
     </p>
