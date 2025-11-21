@@ -101,7 +101,7 @@ https://chromewebstore.google.com/detail/plihohicbpnimfimobapbjeebebabjja?utm_so
 * ウィンドウを小さくしたときのヘッダーのuiの崩れを修正
 * 透明度調整の範囲を修正
 
-### v3
+### v3.0
 * フォント変更機能を追加
 ---
 
