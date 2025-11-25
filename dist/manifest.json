@@ -17,17 +17,30 @@
         "default_title": "Custom-POLITE(moodle)"
     },
 
-    "content_scripts": [
-        {
-            "matches": ["https://polite.do-johodai.ac.jp/moodle/*"],
-            "js": ["content.js"],
-            "run_at": "document_idle"
-        }
-    ],
+"content_scripts": [
+    {
+      "matches": ["https://polite.do-johodai.ac.jp/*"],
+      "css": ["moodle-custom-styles.css"],
+      "run_at": "document_start",
+      "js": ["content.js"] 
+    },
+    {
+      "matches": ["https://polite.do-johodai.ac.jp/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle" 
+    }
+],
+
     "permissions": [
         "storage"
     ],
     "host_permissions": [
         "https://polite.do-johodai.ac.jp/*"
+    ],
+   "web_accessible_resources": [
+    {
+      "resources": ["darkreader.js", "dr_init_bridge.js", "early_dark_fixup.css"], 
+      "matches": ["<all_urls>"]
+    }
     ]
 }

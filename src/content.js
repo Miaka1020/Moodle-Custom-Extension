@@ -1,18 +1,27 @@
 (function() {
     'use strict';
 
+    // I. Constants and Global Variables
+    
     // IndexedDB
     const DB_NAME = 'MoodleCustomBGDB';
     const DB_VERSION = 2;
     const STORE_NAME = 'background_files';
     const DB_KEY_BG = 'current_bg';
 
-    // ストレージキー
+    // Storage keys
     const SETTINGS_STORAGE_KEY = 'moodle_custom_settings_v5';
     const TIMETABLE_STORAGE_KEY = 'moodle_custom_timetable_v2';
     const FONT_CACHE_KEY = 'moodle_fast_font_cache_v2'; 
+    const DARKMODE_ENABLED_KEY = 'darkmode_enabled_v1'; // For fast determination
+    const DARKMODE_SETTINGS_KEY = 'darkmode_settings_v1';
 
-    // デフォルト設定
+    // Global variables
+    let availableCourses = [];
+    let loadStartTime = null; // Record load start time
+    const MIN_LOAD_DURATION_MS = 500; // Minimum display duration (0.5s)
+    
+    // Default settings
     const DEFAULT_SETTINGS = {
         headerBgColor: "#ffffff",
         headerTextColor: "#000000",
@@ -22,13 +31,19 @@
         opacity: 80,
         brightness: 100,
         showTimetable: true,
+        enableCustomLayout: false, 
         contentOpacity: 70,
         fontFamily: "default", 
         customFontName: "",
-        customFontUrl: "" 
+        customFontUrl: "",
+        darkModeMode: 'off', // 'off', 'on', 'auto'
+        darkModeBrightness: 100,
+        darkModeContrast: 100,
+        darkModeGrayscale: 0,
+        darkModeSepia: 0
     };
 
-    // 時間割
+    // Timetable definition
     const DEFAULT_TIMETABLE = {
         "月": {}, "火": {}, "水": {}, "木": {}, "金": {}, "土": {}, "日": {}
     };
@@ -38,12 +53,11 @@
     ];
     const DAY_MAP = ["日", "月", "火", "水", "木", "金", "土"];
 
-    // セレクタ
+    // Selectors
     const BODY_SELECTOR = 'body#page-my-index, body#page-course-view-topics, body#page-course-view-weeks,body#page';
-    const PAGE_WRAPPER_SELECTOR = '#page-wrapper';
     const DASHBOARD_REGION_SELECTOR = '#block-region-content';
 
-    // --- グローバル変数 ---
+    // --- Global variables ---
     let db;
     let currentSettings = {};
     let currentBG_BlobUrl = null;
@@ -55,7 +69,8 @@
     let timelinePoller = null; 
     let pollAttempts = 0; 
     const MAX_POLL_ATTEMPTS = 60;
-
+    
+    // DarkReader cache (for fast application)
     try {
         const cachedFontJson = localStorage.getItem(FONT_CACHE_KEY);
         if (cachedFontJson) {
@@ -65,35 +80,328 @@
     } catch (e) {
         console.warn("Fast font apply failed:", e);
     }
+    
+    // FOUC protection: Fastest inline style injection (before init())
+    // Switched to visibility control because previous inline injection could not prevent FOUC.
+    // Guaranteed to run at the top of content.js
 
-
-    // --- メイン処理 (Initialization) ---
-    async function init() {
-        injectStaticStyles();
-        await setupIndexedDB();
+    try {
+        const storedDarkModeMode = localStorage.getItem(DARKMODE_ENABLED_KEY) || 'off';
+        const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         
-        const settings = await getSettings();
+        const shouldDarkQuickCheck = (
+            storedDarkModeMode === 'on' ||
+            (storedDarkModeMode === 'auto' && isSystemDark)
+        );
         
-        // 初回キャッシュ作成
-        if (!localStorage.getItem(FONT_CACHE_KEY)) {
-            saveFontCache(settings);
+        if (shouldDarkQuickCheck && document.readyState === 'loading') {
+            const inlineStyleContent = `
+        /* Hide everything momentarily to prevent white flash */
+        /* Fix: Make visibility:hidden depend on dark-fouc-mask class */
+        html:not(.dark-fouc-mask-ready) { 
+            visibility: hidden !important; 
+            background-color: #303030 !important;
         }
+        /* Class to display after Dark Reader loads. Added in init() or navigation */
+        html.dark-fouc-mask-ready { 
+            visibility: visible !important; 
+        }
+    `;
+            const style = document.createElement('style');
+            style.id = 'extreme-fouc-fix';
+            style.textContent = inlineStyleContent;
+            
+            // Expect document.documentElement to exist and insert
+            (document.head || document.documentElement).prepend(style);
+            
+            // Add class simultaneously with style tag insertion (fastest insurance)
+            document.documentElement.classList.add("dark-fouc-mask");
 
-        if (document.body) {
-            startUIInjection(settings);
-        } else {
-            document.addEventListener('DOMContentLoaded', () => startUIInjection(settings));
+        } else if (shouldDarkQuickCheck) {
+            // If running at document_end/idle, do not control visibility, rely only on mask CSS
+             document.documentElement.classList.add("dark-fouc-mask");
         }
+    } catch(e) {
+        // Error likely in dev environment, ignoring
     }
     
+    // II. Dark Mode Core Functions & Helpers
+     
+    /**
+     * Inject Dark Reader library and settings bridge into the page.
+     */
+    function injectDarkReaderLogic(settings) {
+        
+        // 1. Embed settings data as DOM element
+        let settingsData = document.getElementById('darkreader-settings-data');
+        if (!settingsData) {
+            settingsData = document.createElement('script');
+            settingsData.id = 'darkreader-settings-data';
+            settingsData.type = 'application/json';
+            document.head.appendChild(settingsData);
+        }
+        settingsData.textContent = JSON.stringify(settings);
+        
+        // 2. Inject Dark Reader library (only once)
+        let drLibScript = document.getElementById('darkreader-library-script');
+        if (!drLibScript) {
+            drLibScript = document.createElement('script');
+            drLibScript.id = 'darkreader-library-script';
+            drLibScript.src = chrome.runtime.getURL("darkreader.js"); 
+            drLibScript.setAttribute('data-skip-loader', 'true'); 
+            document.head.appendChild(drLibScript);
+        }
+        
+        // 3. Inject bridge script for initialization and settings application (runs every time)
+        let initScript = document.getElementById('dr-init-bridge-script');
+        if(initScript) {
+            initScript.remove(); 
+        }
+        
+        initScript = document.createElement('script');
+        initScript.id = 'dr-init-bridge-script';
+        initScript.src = chrome.runtime.getURL("dr_init_bridge.js");
+        document.head.appendChild(initScript);
+    }
+
+    /**
+     * Trigger Dark Mode settings application.
+     */
+    function loadDarkReader(settings) {
+       injectDarkReaderLogic(settings);
+    }
+
+    /**
+     * Fix: Inject custom loading screen (Renewed version)
+     */
+    function injectCustomLoadingScreen() {
+        if (!document.getElementById('moodle-custom-loading-screen')) {
+            const loadingScreen = document.createElement('div');
+            loadingScreen.id = 'moodle-custom-loading-screen';
+            
+            // Image URL
+            const imageUrl = 'https://raw.githubusercontent.com/Miaka1020/Moodle-Custom-Extension/main/assets/Loading2.png';
+
+            loadingScreen.innerHTML = `
+                <div class="loading-content">
+                    <img src="${imageUrl}" alt="" class="custom-loading-img">
+                    <div class="loading-bar-container">
+                        <div class="loading-bar-fill"></div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(loadingScreen);
+        }
+    }
+
+    /**
+     * Fix: Remove custom loading screen (with fade-out)
+     */
+   function removeCustomLoadingScreen() {
+    const customLoadingScreen = document.getElementById('moodle-custom-loading-screen');
+    if (!customLoadingScreen) return;
+
+    const elapsedTime = Date.now() - loadStartTime;
+    const remainingTime = MIN_LOAD_DURATION_MS - elapsedTime;
+
+    // If minimum wait time remains, wait before retrying removal
+    if (remainingTime > 0) {
+        setTimeout(() => {
+            // Execute again (remainingTime should be <= 0)
+            removeCustomLoadingScreen(); 
+        }, remainingTime);
+        return;
+    }
+
+    // If minimum wait time met, start fade-out
+    customLoadingScreen.style.opacity = '0'; // Start fade-out
+    setTimeout(() => {
+        customLoadingScreen.remove();
+    }, 300); // CSS transition time (0.3s)
+
+    // Remove existing dark mode loading screen (if any)
+    const oldLoadingScreen = document.getElementById('darkmode-loading-screen');
+    if (oldLoadingScreen) {
+        oldLoadingScreen.style.opacity = '0';
+        setTimeout(() => {
+            oldLoadingScreen.remove();
+        }, 300);
+    }
+    
+    // Remove FOUC protection class upon load completion (execute as soon as visibility becomes visible)
+    // Since extreme FOUC protection (at top of file) is used, removing class here displays the screen
+    document.documentElement.classList.remove("dark-fouc-mask");
+}
+
+    /**
+     * Inject styles to make backgrounds transparent for elements turned black by Dark Reader.
+     */
+    function injectDarkModeFixupStyles() {
+        // NOTE: This function is integrated into moodle-custom-styles.css and is redundant.
+        let fixStyle = document.getElementById('darkreader-fixup-style');
+        if (!fixStyle) {
+            fixStyle = document.createElement('style');
+            fixStyle.id = 'darkreader-fixup-style';
+            document.head.appendChild(fixStyle);
+        }
+        
+        const fixupCss = `
+            /* Dark Reader Fixup CSS (Integrated into moodle-custom-styles.css) */
+            html[data-darkreader-scheme="dark"] #page-content,
+            html[data-darkreader-scheme="dark"] #page-wrapper,
+            html[data-darkreader-scheme="dark"] #page-header,
+            html[data-darkreader-scheme="dark"] #region-main-box,
+            html[data-darkreader-scheme="dark"] .card,
+            html[data-darkreader-scheme="dark"] .block,
+            html[data-darkreader-scheme="dark"] .list-group-item,
+            html[data-darkreader-scheme="dark"] .que,
+            html[data-darkreader-scheme="dark"] .bg-white,
+            html[data-darkreader-scheme="dark"] .context-header-settings-menu,
+            html[data-darkreader-scheme="dark"] .page-context-header,
+            html[data-darkreader-scheme="dark"] .page-header-wrapper,
+            html[data-darkreader-scheme="dark"] .drawer-content,
+            html[data-darkreader-scheme="dark"] #customTimetableWidget card-body,
+            html[data-darkreader-scheme="dark"] .yui3-js-enabled,
+            html[data-darkreader-scheme="dark"] #page-my-index,
+            html[data-darkreader-scheme="dark"] #page-wrapper,
+            html[data-darkreader-scheme="dark"] .w-100,
+            html[data-darkreader-scheme="dark"] #page-course-view-topics,
+            html[data-darkreader-scheme="dark"] #region-main,
+            html[data-darkreader-scheme="dark"] .card-body .p-3,
+            html[data-darkreader-scheme="dark"] .card-body.p-3,
+            html[data-darkreader-scheme="dark"] .card-body.pt-3,
+            html[data-darkreader-scheme="dark"] .card-text,
+            html[data-darkreader-scheme="dark"] .sr-only
+            {
+                background-color: transparent !important;
+            }
+            html[data-darkreader-scheme="dark"] .card *, 
+            html[data-darkreader-scheme="dark"] .block * {
+                color: var(--darkreader-neutral-text, #e8e6e3) !important;
+            }
+        `;
+        fixStyle.textContent = fixupCss;
+    }
+
+
+    // III. Initialization and Core Flow
+    
+    // Function to inject external CSS (Deprecated, migrated to manifest.json)
+    function injectExternalCSS(fileName) {
+        let link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.type = 'text/css';
+        link.href = chrome.runtime.getURL(fileName);
+        document.head.appendChild(link);
+    }
+    
+    // --- Main Process (Initialization) ---
+async function init() {
+    loadStartTime = Date.now();
+    // 1. [CSS Injection] (Omitted - processing in manifest.json recommended)
+
+    // 2. [Start fast check and FOUC protection]
+    // Fix: Logic removed as extreme FOUC protection is done at top of file.
+    
+    // Static styles (dynamically generated)
+    injectDashboardLayoutStyles(); 
+    
+    await setupIndexedDB(); // DB load is async but needed for settings retrieval
+    
+    // 3. [Load official settings]
+    const settings = await getSettings(); 
+    const shouldDarkFinal = (
+        settings.darkModeMode === 'on' ||
+        (settings.darkModeMode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+    );
+
+    // 4. Adjust FOUC protection class and show custom loading screen (Parallel processing)
+    if (!shouldDarkFinal) {
+         // If DarkMode is not needed, remove temporary class immediately
+         document.body.classList.remove('dark-mode-fouc-temp');
+         // Fix: If Dark Mode is not needed, fast FOUC mask is also not needed, so remove it to display screen
+         document.documentElement.classList.remove("dark-fouc-mask");
+    } else {
+         injectCustomLoadingScreen(); // Insert custom loading screen
+         
+         // [Important] Set forced timeout
+         // Force remove loading screen if Dark Reader application event doesn't fire by 2 seconds
+         setTimeout(() => {
+             const loader = document.getElementById('moodle-custom-loading-screen');
+             // Force remove if opacity is 1 (fade-out hasn't started)
+             if (loader && loader.style.opacity === '1') {
+                 console.warn("Dark Reader loading timed out. Forcing removal of loading screen.");
+                 removeCustomLoadingScreen();
+             }
+         }, 2000); // Execute after 2 seconds
+    }
+    
+    if (!localStorage.getItem(FONT_CACHE_KEY)) {
+        saveFontCache(settings);
+    }
+    
+    // 5. Load DarkReader and trigger style application after load completion (runs in background)
+    loadDarkReader(settings);
+
+    // Inject UI elements and apply initial styles
+    if (document.body) {
+        startUIInjection(settings);
+    } else {
+        document.addEventListener('DOMContentLoaded', () => startUIInjection(settings));
+    }
+
+    // Initial scan (wait for Moodle load)
+    setTimeout(scanCoursesFromPage, 2000); 
+    
+    // --- Debug features ---
+    window.printAvailableCourses = function() {
+        console.log("--- Moodle Customizer: availableCourses ---");
+        console.log(availableCourses);
+        console.log("------------------------------------------");
+    };
+    // ----------------------
+}
+   function changeSiteTitle() {
+        const selectors = [
+            'nav.navbar .navbar-brand',       
+            '.navbar-brand',                  
+            '#page-header .navbar-brand',     
+            'header .site-name a'             
+        ];
+        
+        // Fix: Increased font size from 0.6em -> 0.9em
+        // Adjusted position (top) slightly down to prevent excessive protrusion
+        const newTitleHtml = 'POLITE<sup style="font-size: 0.9em; top: -0.4em; margin-left: 2px;">+</sup>';
+
+        for (const selector of selectors) {
+            const element = document.querySelector(selector);
+            if (element) {
+                const originalText = element.textContent.trim();
+                if (originalText.length > 0) {
+                    element.innerHTML = newTitleHtml;
+                    
+                    element.style.fontWeight = '700';
+                    element.style.letterSpacing = '1.5px'; 
+                    element.style.display = 'inline-flex'; 
+                    element.style.alignItems = 'center';
+                    
+                    console.log(`Moodle Customizer: Site title changed to "POLITE+".`);
+                    return;
+                }
+            }
+        }
+        console.warn("Moodle Customizer: Site title element not found.");
+    }
+
     async function startUIInjection(settings) {
         injectGithubButton(); 
         injectSettingsButton();
         injectSettingsModal(settings);
         
         const timetable = await getTimetable(); 
-        injectEditModal(timetable);
+        injectEditModal(timetable); 
 
+        // Apply custom styles (do not reload settings asynchronously for the first time, use init settings)
         await applyAllCustomStyles(false); 
 
         if (document.URL.includes('/my/')) {
@@ -103,8 +411,252 @@
         if (document.URL.includes('/mod/quiz/review.php')) {
             initQuizRetakeFeature();
         }
+        
+        changeSiteTitle(); 
+
+        bindFoucProtectionOnNavigation();
+
     }
 
+  
+
+    // --- Feature: Auto-scan course info ---
+    function scanCoursesFromPage() {
+        const links = document.querySelectorAll('a[href*="course/view.php?id="]');
+        const courseMap = new Map();
+
+        links.forEach(link => {
+            const href = link.getAttribute('href');
+            const match = href.match(/id=(\d+)/);
+            if (match) {
+                const id = match[1];
+                let name = link.textContent.trim();
+                
+                if (!name) {
+                    name = link.getAttribute('title') || link.getAttribute('aria-label') || "";
+                }
+                
+                if (name && name.length > 2 && !courseMap.has(id)) {
+                    // Exclude generic terms
+                    if(!["コース", "詳細", "Course", "Grades", "Competencies", "成績", "詳細を見る"].includes(name)) {
+                        courseMap.set(id, name);
+                    }
+                }
+            }
+        });
+
+        // Convert Map to array and store
+        availableCourses = Array.from(courseMap, ([id, name]) => ({ id, name }));
+        console.log(`Moodle Customizer: ${availableCourses.length} courses scanned.`);
+    }
+
+    // --- Course name normalization function ---
+    function normalizeCourseName(name) {
+        if (typeof name !== 'string') return '';
+        return name
+            .toLowerCase() 
+            .normalize('NFKC') 
+            .replace(/\s| |　/g, '') 
+            .replace(/（.*）$|\(.*\)$/, ''); 
+    }
+
+    // --- CSS: For suggestion list (Z-INDEX enhanced) ---
+    function injectSuggestionStyles() {
+        const style = document.createElement('style');
+        style.innerHTML = `
+            /* Suggestion list design */
+            .suggestion-list {
+                position: absolute;
+                top: 100%;
+                left: 0;
+                right: 0;
+                background: white;
+                border: 1px solid #ccc;
+                border-radius: 0 0 4px 4px;
+                list-style: none;
+                padding: 0;
+                margin: 0;
+                max-height: 200px; /* Height adjustment */
+                overflow-y: auto;
+                z-index: 2147483647; /* Fix occlusion with max Z-INDEX */
+                box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+                display: none;
+                text-align: left;
+            }
+            .suggestion-list li {
+                padding: 8px 10px;
+                cursor: pointer;
+                font-size: 0.9em;
+                border-bottom: 1px solid #eee;
+                color: #333;
+                background: #fff;
+            }
+            .suggestion-list li:last-child {
+                border-bottom: none;
+            }
+            .suggestion-list li:hover {
+                background-color: #e9ecef;
+                color: #0056b3;
+            }
+            .input-wrapper-relative {
+                position: relative;
+            }
+            /* Styles for alert messages */
+            .modal-alert-message {
+                padding: 10px;
+                background-color: #fff3cd; 
+                color: #856404; 
+                border: 1px solid #ffeeba;
+                border-radius: 4px;
+                margin-bottom: 15px;
+                font-size: 0.9em;
+                line-height: 1.4;
+            }
+            .modal-alert-message strong {
+                color: #dc3545; /* Highlight in red */
+            }
+            /* DarkReader overrides */
+            html[data-darkreader-scheme="dark"] .modern-modal-content {
+                background-color: #1c1c1c !important;
+                color: #d1d1d1 !important;
+            }
+            html[data-darkreader-scheme="dark"] .modern-modal-header {
+                background: #252525 !important;
+                border-bottom-color: #333 !important;
+            }
+            html[data-darkreader-scheme="dark"] .modern-modal-footer {
+                background: #252525 !important;
+                border-top-color: #333 !important;
+            }
+            html[data-darkreader-scheme="dark"] .settings-group {
+                background: #252525 !important;
+                border-color: #333 !important;
+            }
+            html[data-darkreader-scheme="dark"] .modern-input, 
+            html[data-darkreader-scheme="dark"] .modern-select {
+                background: #333 !important;
+                color: #d1d1d1 !important;
+                border-color: #555 !important;
+            }
+            html[data-darkreader-scheme="dark"] .modern-range::-webkit-slider-thumb {
+                background: #0099ff !important; 
+            }
+            html[data-darkreader-scheme="dark"] .toggle-switch .slider {
+                background-color: #555 !important; 
+            }
+            html[data-darkreader-scheme="dark"] .toggle-switch input:checked + .slider {
+                background-color: #007bff !important; 
+            }
+            html[data-darkreader-scheme="dark"] .toggle-switch .label-text { 
+                color: #d1d1d1 !important; 
+            }
+            html[data-darkreader-scheme="dark"] .modal-alert-message {
+                background-color: #584f3e !important; 
+                color: #f7e6b7 !important; 
+                border-color: #807357 !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    
+
+    // --- CSS: For layout adjustment (create frame only) ---
+    function injectDashboardLayoutStyles() {
+        const style = document.createElement('style');
+        style.id = 'dashboard-fullwidth-layout-css';
+        document.head.appendChild(style);
+    }
+
+    // --- Feature: Toggle layout ---
+    function toggleDashboardLayout(enabled) {
+        const style = document.getElementById('dashboard-fullwidth-layout-css');
+        if (!style) return;
+
+        if (!document.URL.includes('/my/') || document.URL.includes('/my/courses.php')) {
+            style.innerHTML = ''; 
+            return;
+        }
+
+        if (enabled) {
+            style.innerHTML = `
+                /* 1. Force release page width limit */
+                @media (min-width: 992px) {
+                    body.limitedwidth #page.drawers .main-inner,
+                    .header-maxwidth {
+                        max-width: 98% !important; 
+                        width: 98% !important;
+                        margin-left: auto !important;
+                        margin-right: auto !important;
+                    }
+                }
+
+                /* 2. Dashboard block layout (Grid layout) */
+                @media (min-width: 1200px) {
+                    #block-region-content {
+                        display: grid !important;
+                        grid-template-columns: 1fr 1fr !important; 
+                        gap: 20px !important;
+                        align-items: start !important;
+                    }
+
+                    /* --- Block placement specifications --- */
+
+                    /* Priority 1: Announcements (Top, Full width) */
+                    section.block_site_announcements,
+                    section.block_news_items {
+                        grid-column: 1 / -1 !important;
+                        order: 1 !important;
+                    }
+
+                    /* Priority 2: Left: Custom Timetable */
+                    div#customTimetableWidget {
+                        grid-column: 1 / 2 !important; 
+                        order: 2 !important;
+                        margin-bottom: 0 !important;
+                        height: auto !important;
+                    }
+
+                    /* Priority 3: Right: Timeline */
+                    section.block_timeline {
+                        grid-column: 2 / 3 !important; 
+                        order: 3 !important;
+                        margin-bottom: 0 !important;
+                        height: auto !important;
+                    }
+                    /* Adjust timeline content to prevent cutoff */
+                    section.block_timeline .card-body {
+                        max-height: 600px !important; 
+                        overflow-y: auto !important;
+                    }
+
+                    /* Priority 4: Other content (Bottom, Full width) */
+                    section.block_myoverview,
+                    section.block_recentlyaccesseditems,
+                    section.block_recentlyaccessedcourses {
+                        grid-column: 1 / -1 !important; 
+                        order: 10 !important;
+                    }
+
+                    /* Priority 5: Calendar at the bottom */
+                    section.block_calendar_month {
+                        grid-column: 1 / -1 !important; 
+                        order: 100 !important; 
+                    }
+                    
+                    /* Disable invisible elements causing layout breakage */
+                    #block-region-content > :not(.block):not(#customTimetableWidget) {
+                        display: none !important;
+                    }
+                }
+            `;
+        } else {
+            style.innerHTML = ''; 
+        }
+    }
+
+
+    // IV. Storage & Persistence
 
     // --- IndexedDB ---
     function setupIndexedDB() {
@@ -159,50 +711,77 @@
             request.onerror = (e) => reject(e);
         });
     }
+    
+    // getBackgroundFile (Loading logic)
+    async function getBackgroundFile(backgroundUrl) {
+         if (backgroundUrl === 'indexeddb') {
+             const fileData = await loadFileFromDB();
+             return fileData ? fileData.blob : null;
+         }
+         return null;
+    }
 
-    // --- 設定 (Storage) ---
+    // --- Settings (Storage) ---
     async function getSettings() {
-        const data = await chrome.storage.local.get(SETTINGS_STORAGE_KEY);
+        // Async retrieve settings from chrome.storage.local
+        const storedSettings = await chrome.storage.local.get(SETTINGS_STORAGE_KEY);
+        const storedDarkmode = await chrome.storage.local.get(DARKMODE_SETTINGS_KEY);
+        
         let settings;
-        const stored = data[SETTINGS_STORAGE_KEY];
+        let darkmodeSettings = {};
+        
+        // Fix: Fast retrieval of latest Dark Mode settings from local storage
+        const fastDarkModeMode = localStorage.getItem(DARKMODE_ENABLED_KEY); 
 
-        if (stored) {
+        // 1. Load normal settings
+        if (storedSettings[SETTINGS_STORAGE_KEY]) {
             try {
-                settings = JSON.parse(stored);
+                settings = JSON.parse(storedSettings[SETTINGS_STORAGE_KEY]);
             } catch (e) {
+                console.error("Error parsing settings:", e);
                 settings = DEFAULT_SETTINGS;
             }
         } else {
             settings = DEFAULT_SETTINGS;
         }
 
-        currentSettings = { ...DEFAULT_SETTINGS, ...settings };
-
-        if (currentSettings.backgroundUrl === 'indexeddb') {
+        // 2. Load Dark Mode settings
+        if (storedDarkmode[DARKMODE_SETTINGS_KEY]) {
             try {
-                const fileData = await loadFileFromDB();
-                if (fileData) {
-                    if (currentBG_BlobUrl) URL.revokeObjectURL(currentBG_BlobUrl);
-                    currentBG_BlobUrl = fileData.url;
-                    currentSettings.backgroundUrl = fileData.url;
-                    currentSettings.backgroundType = fileData.type.startsWith('video/') ? 'video' : 'image';
-                } else {
-                    currentSettings.backgroundUrl = '';
-                    currentSettings.backgroundType = 'none';
-                }
+                darkmodeSettings = JSON.parse(storedDarkmode[DARKMODE_SETTINGS_KEY]);
             } catch (e) {
-                currentSettings.backgroundUrl = '';
-                currentSettings.backgroundType = 'none';
+                console.error("Error parsing darkmode settings:", e);
+                darkmodeSettings = {}; 
             }
-        } else if (currentSettings.backgroundUrl !== '' && !currentSettings.backgroundUrl.startsWith('blob:')) {
-            currentSettings.backgroundUrl = '';
-            currentSettings.backgroundType = 'none';
+        }
+        
+        // 3. [Critical] Prioritize overwriting with fast check values
+        if (fastDarkModeMode) {
+            darkmodeSettings.darkModeMode = fastDarkModeMode;
+        }
+
+        // 4. Merge all settings
+        currentSettings = { ...DEFAULT_SETTINGS, ...settings, ...darkmodeSettings };
+
+        // 5. Background URL processing
+        if (currentSettings.backgroundUrl === 'indexeddb' || currentSettings.backgroundUrl.startsWith('blob:')) {
+             // Load file stored in IndexedDB
+             const fileData = await loadFileFromDB(); 
+             if (fileData && fileData.url) {
+                 currentBG_BlobUrl = fileData.url; 
+                 currentSettings.localBackgroundUrl = fileData.url; 
+                 currentSettings.backgroundType = fileData.type.startsWith('video/') ? 'video' : 'image';   
+                 currentSettings.backgroundUrl = 'indexeddb';
+             } else {
+                 console.warn("Background file not found in DB. Resetting to none.");
+                 currentSettings.backgroundUrl = '';
+                 currentSettings.backgroundType = 'none';
+             }
         }
         
         return currentSettings;
     }
 
-    // フォントキャッシュ保存用ヘルパー
     function saveFontCache(settings) {
         try {
             localStorage.setItem(FONT_CACHE_KEY, JSON.stringify({
@@ -213,29 +792,52 @@
         } catch (e) { console.warn("Failed to update font cache", e); }
     }
 
-    async function saveSettings(settings) {
+  async function saveSettings(settings) {
         if (currentBG_BlobUrl && currentBG_BlobUrl !== settings.backgroundUrl) {
             URL.revokeObjectURL(currentBG_BlobUrl);
             currentBG_BlobUrl = null;
         }
 
         saveFontCache(settings);
+        
+        // Separate Dark Mode settings
+        const { darkModeMode, darkModeBrightness, darkModeContrast, darkModeGrayscale, darkModeSepia, ...restSettings } = settings;
 
-        let settingsToSave = { ...settings };
-        if (settingsToSave.backgroundUrl.startsWith('blob:')) {
+        // Prepare to save normal settings
+        let settingsToSave = { ...restSettings };
+        
+        // Fix: Prevent overwriting backgroundType
+        const originalBackgroundUrl = settingsToSave.backgroundUrl;
+        const originalBackgroundType = settingsToSave.backgroundType; // Holds value 'image' or 'video'
+
+        if (originalBackgroundUrl.startsWith('blob:') || originalBackgroundUrl === 'indexeddb') {
+            // If local file (via IndexedDB)
             settingsToSave.backgroundUrl = 'indexeddb';
-        } else if (settingsToSave.backgroundUrl !== 'indexeddb') {
+            settingsToSave.backgroundType = originalBackgroundType; // [Keep]
+        } else if (originalBackgroundUrl.startsWith('http')) {
+            // If external URL specified directly (not in UI but for future)
+            settingsToSave.backgroundUrl = originalBackgroundUrl;
+            settingsToSave.backgroundType = originalBackgroundType; // [Keep]
+        } else {
+            // Otherwise (no direct URL or 'none')
             settingsToSave.backgroundUrl = '';
             settingsToSave.backgroundType = 'none';
         }
+        
+        // Save Dark Mode settings
+        const darkmodeSettingsToSave = { darkModeMode, darkModeBrightness, darkModeContrast, darkModeGrayscale, darkModeSepia };
+            
+        // Fix: Save darkModeMode directly to local storage for fast check
+        localStorage.setItem(DARKMODE_ENABLED_KEY, darkModeMode); 
 
         await chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: JSON.stringify(settingsToSave) });
-        currentSettings = settings; 
+        await chrome.storage.local.set({ [DARKMODE_SETTINGS_KEY]: JSON.stringify(darkmodeSettingsToSave) });
+
+        currentSettings = settings;
     }
 
-
-    // --- UI挿入・イベント (Settings Modal) ---
-
+    // V. UI Insertion and Events
+     
     function injectGithubButton() {
         const usermenu = document.querySelector('#usernavigation .usermenu');
         if (!usermenu || document.getElementById('custom-github-nav-item')) return;
@@ -272,7 +874,7 @@
                 background: none; border: none; padding: 0.5rem 0.8rem;
                 cursor: pointer; font-size: 1.25rem; line-height: 1;
             " title="Moodleカスタム設定">
-                <i class="fa fa-cog" aria-hidden="true"></i> </button>
+                <i class="icon fa fa-cog" aria-hidden="true"></i> </button>
         `;
         usermenu.prepend(settingItem);
 
@@ -290,7 +892,6 @@
 
    function injectSettingsModal(settings) {
         injectModernModalStyles();
-
         const modalHtml = `
             <div id="custom-settings-modal" class="modern-modal-overlay">
                 <div id="custom-settings-content" class="modern-modal-content">
@@ -300,6 +901,53 @@
                     </div>
                     
                     <div class="modern-modal-body">
+                        <div class="settings-group">
+                            <div class="group-title">Dark Mode (Beta)</div>
+                            <div class="input-wrapper">
+                                <label>モード</label>
+                                <select id="darkModeModeSelect" class="modern-select">
+                                    <option value="off" ${settings.darkModeMode === 'off' ? 'selected' : ''}>オフ</option>
+                                    <option value="on" ${settings.darkModeMode === 'on' ? 'selected' : ''}>常にオン</option>
+                                    <option value="auto" ${settings.darkModeMode === 'auto' ? 'selected' : ''}>システム設定に従う</option>
+                                </select>
+                            </div>
+                            <div class="slider-container">
+                                <div class="slider-label">
+                                    <span>明るさ (Brightness)</span>
+                                    <div class="slider-value-group">
+                                        <span id="darkModeBrightnessValue">${settings.darkModeBrightness}</span>%
+                                    </div>
+                                </div>
+                                <input type="range" id="darkModeBrightnessRange" min="0" max="150" value="${settings.darkModeBrightness}" class="modern-range">
+                            </div>
+                            <div class="slider-container">
+                                <div class="slider-label">
+                                    <span>コントラスト (Contrast)</span>
+                                    <div class="slider-value-group">
+                                        <span id="darkModeContrastValue">${settings.darkModeContrast}</span>%
+                                    </div>
+                                </div>
+                                <input type="range" id="darkModeContrastRange" min="0" max="150" value="${settings.darkModeContrast}" class="modern-range">
+                            </div>
+                            <div class="slider-container">
+                                <div class="slider-label">
+                                    <span>グレースケール (Grayscale)</span>
+                                    <div class="slider-value-group">
+                                        <span id="darkModeGrayscaleValue">${settings.darkModeGrayscale}</span>%
+                                    </div>
+                                </div>
+                                <input type="range" id="darkModeGrayscaleRange" min="0" max="100" value="${settings.darkModeGrayscale}" class="modern-range">
+                            </div>
+                            <div class="slider-container">
+                                <div class="slider-label">
+                                    <span>セピア (Sepia)</span>
+                                    <div class="slider-value-group">
+                                        <span id="darkModeSepiaValue">${settings.darkModeSepia}</span>%
+                                    </div>
+                                </div>
+                                <input type="range" id="darkModeSepiaRange" min="0" max="100" value="${settings.darkModeSepia}" class="modern-range">
+                            </div>
+                        </div>
                         <div class="settings-group">
                             <div class="group-title">Header Style</div>
                             <div class="color-picker-grid">
@@ -323,16 +971,14 @@
                             <input type="file" id="backgroundFileInput" accept="image/*,video/*" style="display: none;">
                             <button id="selectBackgroundBtn" class="modern-btn primary-btn full-width"><i class="fa fa-folder-open"></i> ファイルを選択 (Image/Video)</button>
                             <p id="currentBackgroundInfo" class="status-text"></p>
-                            
                             <div class="radio-group" style="display:flex; justify-content:center; gap:20px; margin-bottom:10px;">
-                                <label class="radio-label" style="color:#ccc;">
+                                <label class="radio-label" style="color:#333;">
                                     <input type="radio" id="bg-type-video" name="bg-type" value="video" ${settings.backgroundType === 'video' ? 'checked' : ''} disabled> 動画
                                 </label>
-                                <label class="radio-label" style="color:#ccc;">
+                                <label class="radio-label" style="color:#333;">
                                     <input type="radio" id="bg-type-image" name="bg-type" value="image" ${settings.backgroundType === 'image' ? 'checked' : ''} disabled> 画像
                                 </label>
                             </div>
-
                             <div class="slider-container">
                                 <div class="slider-label">
                                     <span>透明度</span>
@@ -352,7 +998,6 @@
                                 <input type="range" id="brightnessRange" min="0" max="200" value="${settings.brightness}" class="modern-range">
                             </div>
                         </div>
-                        
                         <div class="settings-group">
                             <div class="group-title">Typography</div>
                             <div class="input-wrapper">
@@ -381,7 +1026,6 @@
                                 <input type="text" id="customFontUrlInput" class="modern-input" placeholder="例: https://fonts.googleapis.com/..." value="${settings.customFontUrl || ''}">
                             </div>
                         </div>
-
                         <div class="settings-group">
                             <div class="group-title">Content Area</div>
                             <div class="slider-container">
@@ -394,21 +1038,23 @@
                                 <input type="range" id="contentOpacityRange" min="0" max="100" value="${settings.contentOpacity}" class="modern-range">
                             </div>
                         </div>
-
                         <div class="settings-group">
                             <div class="group-title">Widgets</div>
+                            <label class="toggle-switch" style="margin-bottom: 10px;">
+                                <input type="checkbox" id="enableCustomLayoutCheckbox" ${settings.enableCustomLayout ? 'checked' : ''}>
+                                <span class="slider"></span>
+                                <span class="label-text">ダッシュボードのレイアウトを拡張 (PC用)</span>
+                            </label>
                             <label class="toggle-switch">
                                 <input type="checkbox" id="showTimetableCheckbox" ${settings.showTimetable ? 'checked' : ''}>
                                 <span class="slider"></span>
                                 <span class="label-text">ダッシュボードに時間割を表示</span>
                             </label>
                         </div>
-                        
                         <div style="text-align: right; margin-top: 10px;">
                             <button id="resetSettingsBtn" class="modern-text-btn danger"><i class="fa fa-trash"></i> 設定を初期化</button>
                         </div>
                     </div>
-
                     <div class="modern-modal-footer">
                         <button id="closeSettingsModal" class="modern-btn secondary-btn">閉じる</button>
                         <button id="saveSettingsBtn" class="modern-btn primary-btn glow">保存して適用</button>
@@ -420,7 +1066,7 @@
         bindSettingsModalEvents();
     }
 
-    // --- モダンデザイン用CSS注入 (修正版: 右寄せ強制・ブルーテーマ) ---
+    // --- Modern Modal (Custom Settings Popup) Styles ---
     function injectModernModalStyles() {
         const existingStyle = document.getElementById('modern-modal-css');
         if (existingStyle) existingStyle.remove();
@@ -428,138 +1074,120 @@
         const style = document.createElement('style');
         style.id = 'modern-modal-css';
         style.innerHTML = `
-            /* オーバーレイ */
-            .modern-modal-overlay {
-                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background-color: rgba(0, 0, 0, 0.85);
-                z-index: 10001; display: none;
-                justify-content: center; align-items: center;
-                animation: fadeIn 0.2s ease;
+            /* White base design CSS */
+            .modern-modal-overlay { 
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+                background-color: rgba(0, 0, 0, 0.5); 
+                z-index: 10001; display: none; justify-content: center; align-items: center; 
+                animation: fadeIn 0.2s ease; 
             }
-
-            /* モーダル本体 */
-            .modern-modal-content {
-                background: #1a1b20;
-                color: #e0e0e0;
-                border-radius: 12px;
-                width: 95%; max-width: 550px; max-height: 85vh;
-                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
-                border: 1px solid rgba(0, 119, 255, 0.3);
-                display: flex; flex-direction: column;
-                font-family: 'Segoe UI', sans-serif;
-                overflow: hidden;
+            .modern-modal-content { 
+                background: #ffffff; 
+                color: #333333; 
+                border-radius: 12px; width: 95%; max-width: 550px; max-height: 85vh; 
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); 
+                border: 1px solid #e0e0e0; 
+                display: flex; flex-direction: column; font-family: 'Segoe UI', sans-serif; 
+                overflow: hidden; 
             }
-
-            /* ヘッダー */
-            .modern-modal-header {
-                padding: 15px 25px;
-                background: linear-gradient(90deg, rgba(0, 60, 150, 0.2) 0%, transparent 100%);
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            .modern-modal-header { 
+                padding: 15px 25px; 
+                background: #f8f9fa; 
+                border-bottom: 1px solid #e0e0e0; 
             }
-            .modern-modal-header h4 {
-                margin: 0; font-size: 1.5rem; font-weight: 700;
-                background: linear-gradient(90deg, #fff, #00d2ff);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
+            .modern-modal-header h4 { 
+                margin: 0; font-size: 1.5rem; font-weight: 700; 
+                color: #0056b3; 
+                background: none; -webkit-background-clip: unset; -webkit-text-fill-color: unset; 
             }
-            .sub-text { margin: 5px 0 0; font-size: 0.85rem; color: #8bb9d6; }
-
-            /* ボディ */
-            .modern-modal-body {
-                padding: 25px; overflow-y: auto;
-                scrollbar-width: thin; scrollbar-color: #0056b3 transparent;
+            .sub-text { 
+                margin: 5px 0 0; font-size: 0.85rem; 
+                color: #6c757d; 
+            }
+            .modern-modal-body { 
+                padding: 25px; overflow-y: auto; 
+                scrollbar-width: thin; scrollbar-color: #007bff transparent; 
             }
             .modern-modal-body::-webkit-scrollbar { width: 8px; }
-            .modern-modal-body::-webkit-scrollbar-thumb { background-color: #0056b3; border-radius: 4px; }
-
-            /* グループ */
-            .settings-group {
-                background: rgba(255, 255, 255, 0.02);
-                border-radius: 8px; padding: 15px; margin-bottom: 15px;
-                border: 1px solid rgba(255, 255, 255, 0.08);
+            .modern-modal-body::-webkit-scrollbar-thumb { background-color: #007bff; border-radius: 4px; }
+            
+            .settings-group { 
+                background: #f8f8f8; 
+                border-radius: 8px; padding: 15px; margin-bottom: 15px; 
+                border: 1px solid #e0e0e0; 
             }
-            .group-title {
-                font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px;
-                color: #00d2ff;
-                margin-bottom: 10px; font-weight: 600;
+            .group-title { 
+                font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; 
+                color: #007bff; 
+                margin-bottom: 10px; font-weight: 600; 
             }
-
-            /* 入力系 */
             .input-wrapper { margin-bottom: 15px; }
-            .input-wrapper label { display: block; font-size: 0.9rem; margin-bottom: 5px; color: #ccc; }
-            .modern-input, .modern-select {
-                width: 100%; padding: 8px 12px; background: #0f1012;
-                border: 1px solid #333; border-radius: 6px; color: #fff; transition: border-color 0.2s;
+            .input-wrapper label { 
+                display: block; font-size: 0.9rem; margin-bottom: 5px; 
+                color: #555; 
             }
-            .modern-input:focus, .modern-select:focus { outline: none; border-color: #0077ff; background: #000; }
-            .modern-select option { background-color: #1f2937; color: #fff; }
-
-            /* カラーピッカー */
+            .modern-input, .modern-select { 
+                width: 100%; padding: 8px 12px; 
+                background: #ffffff; 
+                border: 1px solid #ccc; 
+                border-radius: 6px; 
+                color: #333; 
+                transition: border-color 0.2s; 
+            }
+            .modern-input:focus, .modern-select:focus { 
+                outline: none; 
+                border-color: #007bff; 
+                background: #fff; 
+            }
+            .modern-select option { 
+                background-color: #ffffff; 
+                color: #333; 
+            }
             .color-picker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
             .color-item { text-align: center; }
-            .color-item label { font-size: 0.75rem; display: block; margin-bottom: 5px; color: #aaa; }
-            .color-wrapper { height: 35px; border-radius: 6px; overflow: hidden; border: 1px solid #444; cursor: pointer; }
+            .color-item label { font-size: 0.75rem; display: block; margin-bottom: 5px; color: #777; }
+            .color-wrapper { height: 35px; border-radius: 6px; overflow: hidden; border: 1px solid #ccc; cursor: pointer; }
             input[type="color"] { width: 100%; height: 100%; padding: 0; border: none; background: none; cursor: pointer; transform: scale(1.5); }
-
-            /* ▼▼▼ ここが修正の肝：スライダーラベルのスタイル強化 ▼▼▼ */
             .slider-container { margin-top: 15px; }
-            
-            .slider-label { 
-                display: flex; 
-                justify-content: space-between; 
-                align-items: center;
-                font-size: 0.85rem; 
-                color: #ddd; 
-                margin-bottom: 8px; 
-                width: 100%; /* 幅を確保 */
-            }
-            
-            /* 数値と%をまとめるラッパー */
-            .slider-value-group {
-                display: inline-flex;
-                align-items: center;
-                justify-content: flex-end;
-                gap: 2px; /* 数字と%の間隔 */
-                font-family: monospace; /* 数字の幅を揃える */
-                font-size: 1.1em; /* 少し大きく */
-                color: #00d2ff; /* 青色にして強調 */
-            }
-            /* ▲▲▲ 修正ここまで ▲▲▲ */
-
-            .modern-range {
-                -webkit-appearance: none; width: 100%; height: 4px; background: #333; border-radius: 2px; outline: none;
-            }
-            .modern-range::-webkit-slider-thumb {
-                -webkit-appearance: none; width: 16px; height: 16px; background: #0077ff; border-radius: 50%; cursor: pointer;
-                box-shadow: 0 0 8px rgba(0, 119, 255, 0.5); transition: transform 0.1s;
-            }
+            .slider-label { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; color: #333; margin-bottom: 8px; width: 100%; }
+            .slider-value-group { display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; font-family: monospace; font-size: 1.1em; color: #007bff; }
+            .modern-range { -webkit-appearance: none; width: 100%; height: 4px; background: #ccc; border-radius: 2px; outline: none; }
+            .modern-range::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; background: #007bff; border-radius: 50%; cursor: pointer; box-shadow: 0 0 8px rgba(0, 119, 255, 0.5); transition: transform 0.1s; }
             .modern-range::-webkit-slider-thumb:hover { transform: scale(1.2); }
-
-            /* フッター・ボタン */
-            .modern-modal-footer {
-                padding: 15px 25px; background: rgba(0,0,0,0.3); border-top: 1px solid rgba(255,255,255,0.05);
-                display: flex; justify-content: flex-end; gap: 10px;
+            
+            .modern-modal-footer { 
+                padding: 15px 25px; 
+                background: #f8f9fa; 
+                border-top: 1px solid #e0e0e0; 
+                display: flex; justify-content: flex-end; gap: 10px; 
             }
             .modern-btn { padding: 8px 20px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
-            .primary-btn { background: linear-gradient(135deg, #0062ff 0%, #00b7ff 100%); color: white; }
-            .primary-btn:hover { filter: brightness(1.1); }
-            .secondary-btn { background: #333; color: #ccc; }
-            .secondary-btn:hover { background: #444; color: #fff; }
+            .primary-btn { 
+                background: linear-gradient(135deg, #007bff 0%, #00b7ff 100%); 
+                color: white; 
+            }
+            .secondary-btn { 
+                background: #e0e0e0; 
+                color: #333; 
+            }
+            .secondary-btn:hover { background: #ccc; color: #000; }
+            .status-text { font-size: 0.8rem; color: #777; margin-bottom: 15px; text-align: center; }
+            .toggle-switch .slider { background-color: #ccc; } 
+            .toggle-switch .slider:before { background-color: white; }
+            .toggle-switch input:checked + .slider { background-color: #007bff; } 
+            .toggle-switch .label-text { color: #333; }
+            .modern-text-btn.danger { color: #dc3545; } 
+            
             .full-width { width: 100%; margin-bottom: 10px; text-align: center; }
             .modern-text-btn { background: none; border: none; cursor: pointer; font-size: 0.85rem; padding: 5px; border-radius: 4px; }
-            .modern-text-btn.danger { color: #ff4d4d; }
             
-            .status-text { font-size: 0.8rem; color: #aaa; margin-bottom: 15px; text-align: center; }
-
-            /* トグル */
             .toggle-switch { display: flex; align-items: center; cursor: pointer; user-select: none; }
             .toggle-switch input { display: none; }
-            .toggle-switch .slider { width: 36px; height: 20px; background-color: #444; border-radius: 20px; position: relative; margin-right: 10px; }
+            .toggle-switch .slider { width: 36px; height: 20px; background-color: #ccc; border-radius: 20px; position: relative; margin-right: 10px; }
             .toggle-switch .slider:before { content: ""; position: absolute; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: .2s; }
             .toggle-switch input:checked + .slider { background-color: #0077ff; }
             .toggle-switch input:checked + .slider:before { transform: translateX(16px); }
-            .toggle-switch .label-text { color: #ddd; font-size: 0.9rem; }
-
+            .toggle-switch .label-text { color: #333; font-size: 0.9rem; }
             @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         `;
         document.head.appendChild(style);
@@ -573,6 +1201,11 @@
         const info = document.getElementById('currentBackgroundInfo');
         const bgVideoRadio = document.getElementById('bg-type-video');
         const bgImageRadio = document.getElementById('bg-type-image');
+        
+        const videoLabel = bgVideoRadio.closest('label');
+        const imageLabel = bgImageRadio.closest('label');
+        if (videoLabel) videoLabel.style.color = '#333';
+        if (imageLabel) imageLabel.style.color = '#333';
         
         bgVideoRadio.checked = settings.backgroundType === 'video';
         bgImageRadio.checked = settings.backgroundType === 'image';
@@ -589,16 +1222,27 @@
         document.getElementById('brightnessValue').textContent = settings.brightness;
         
         document.getElementById('showTimetableCheckbox').checked = settings.showTimetable;
+        document.getElementById('enableCustomLayoutCheckbox').checked = settings.enableCustomLayout;
+
         document.getElementById('contentOpacityRange').value = settings.contentOpacity;
         document.getElementById('contentOpacityValue').textContent = settings.contentOpacity;
 
-        // フォント設定
         document.getElementById('fontFamilySelect').value = settings.fontFamily || 'default';
         document.getElementById('customFontNameInput').value = settings.customFontName || '';
-        document.getElementById('customFontUrlInput').value = settings.customFontUrl || ''; // URLもロード
+        document.getElementById('customFontUrlInput').value = settings.customFontUrl || ''; 
+
+        // Load Dark Mode settings
+        document.getElementById('darkModeModeSelect').value = settings.darkModeMode;
+        document.getElementById('darkModeBrightnessRange').value = settings.darkModeBrightness;
+        document.getElementById('darkModeBrightnessValue').textContent = settings.darkModeBrightness;
+        document.getElementById('darkModeContrastRange').value = settings.darkModeContrast;
+        document.getElementById('darkModeContrastValue').textContent = settings.darkModeContrast;
+        document.getElementById('darkModeGrayscaleRange').value = settings.darkModeGrayscale;
+        document.getElementById('darkModeGrayscaleValue').textContent = settings.darkModeGrayscale;
+        document.getElementById('darkModeSepiaRange').value = settings.darkModeSepia;
+        document.getElementById('darkModeSepiaValue').textContent = settings.darkModeSepia;
     }
 
-    // 背景プレビューの適用
     function applyBackgroundPreview() {
         const opacityRange = document.getElementById('opacityRange');
         const brightnessRange = document.getElementById('brightnessRange');
@@ -617,34 +1261,57 @@
             brightness: newBrightness
         });
     }
+    
+    // Dark Mode settings preview application function
+    function applyDarkmodePreview() {
+         const modeSelect = document.getElementById('darkModeModeSelect');
+         const brightnessRange = document.getElementById('darkModeBrightnessRange');
+         const contrastRange = document.getElementById('darkModeContrastRange');
+         const grayscaleRange = document.getElementById('darkModeGrayscaleRange');
+         const sepiaRange = document.getElementById('darkModeSepiaRange');
 
-    // モーダルのイベントリスナー設定
+         const newSettings = {
+             darkModeMode: modeSelect.value,
+             darkModeBrightness: parseInt(brightnessRange.value),
+             darkModeContrast: parseInt(contrastRange.value),
+             darkModeGrayscale: parseInt(grayscaleRange.value),
+             darkModeSepia: parseInt(sepiaRange.value)
+         };
+         
+         document.getElementById('darkModeBrightnessValue').textContent = newSettings.darkModeBrightness;
+         document.getElementById('darkModeContrastValue').textContent = newSettings.darkModeContrast;
+         document.getElementById('darkModeGrayscaleValue').textContent = newSettings.darkModeGrayscale;
+         document.getElementById('darkModeSepiaValue').textContent = newSettings.darkModeSepia;
+         
+         applyDarkmodeStyle({ ...currentSettings, ...newSettings });
+    }
+
     function bindSettingsModalEvents() {
         const modal = document.getElementById('custom-settings-modal');
         const saveBtn = document.getElementById('saveSettingsBtn');
         const closeBtn = document.getElementById('closeSettingsModal');
         const resetBtn = document.getElementById('resetSettingsBtn');
         
-        // ヘッダー
         const headerBgInput = document.getElementById('headerBgColorInput');
         const headerTextInput = document.getElementById('headerTextColorInput');
         const headerStrokeInput = document.getElementById('headerStrokeColorInput');
-
-        // 背景
         const opacityRange = document.getElementById('opacityRange');
         const brightnessRange = document.getElementById('brightnessRange');
         const contentOpacityRange = document.getElementById('contentOpacityRange');
-        
-        // フォント
         const fontSelect = document.getElementById('fontFamilySelect');
         const customFontInput = document.getElementById('customFontNameInput');
         const customFontUrlInput = document.getElementById('customFontUrlInput');
-        
-        // ファイル
         const fileInput = document.getElementById('backgroundFileInput');
         const selectFileBtn = document.getElementById('selectBackgroundBtn');
+        const layoutCheckbox = document.getElementById('enableCustomLayoutCheckbox');
+        
+        // Dark Mode related elements
+        const modeSelect = document.getElementById('darkModeModeSelect');
+        const dmBrightnessRange = document.getElementById('darkModeBrightnessRange');
+        const dmContrastRange = document.getElementById('darkModeContrastRange');
+        const dmGrayscaleRange = document.getElementById('darkModeGrayscaleRange');
+        const dmSepiaRange = document.getElementById('darkModeSepiaRange');
 
-        // ヘッダープレビュー
         function applyHeaderPreview() {
             applyHeaderStyles({
                 ...currentSettings,
@@ -657,11 +1324,16 @@
         headerTextInput.addEventListener('input', applyHeaderPreview);
         headerStrokeInput.addEventListener('input', applyHeaderPreview);
 
-        // 背景プレビュー
         opacityRange.addEventListener('input', applyBackgroundPreview);
         brightnessRange.addEventListener('input', applyBackgroundPreview);
+        
+        // Dark Mode preview events (immediate application on input, change)
+        modeSelect.addEventListener('change', applyDarkmodePreview);
+        dmBrightnessRange.addEventListener('input', applyDarkmodePreview);
+        dmContrastRange.addEventListener('input', applyDarkmodePreview);
+        dmGrayscaleRange.addEventListener('input', applyDarkmodePreview);
+        dmSepiaRange.addEventListener('input', applyDarkmodePreview);
 
-        // コンテンツ透明度プレビュー
         if (contentOpacityRange) {
              contentOpacityRange.addEventListener('input', (e) => {
                  document.getElementById('contentOpacityValue').textContent = e.target.value;
@@ -669,7 +1341,6 @@
              });
         }
         
-        // フォントプレビュー
         function applyFontPreview() {
             applyFontStyle({
                 ...currentSettings,
@@ -682,8 +1353,6 @@
         if (customFontInput) customFontInput.addEventListener('input', applyFontPreview);
         if (customFontUrlInput) customFontUrlInput.addEventListener('input', applyFontPreview);
 
-        
-        // ファイルリスナー
         if (selectFileBtn) {
             selectFileBtn.addEventListener('click', () => {
                 fileInput.click();
@@ -695,12 +1364,11 @@
                      const file = e.target.files[0];
                      const type = file.type.startsWith('video/') ? 'video' : 'image';
                      handleFileSelection(file, type);
-                     e.target.value = ''; // ファイル選択をリセット
+                     e.target.value = ''; 
                  }
             });
         }
 
-        // モーダルボタンリスナー
         if (saveBtn) {
             saveBtn.addEventListener('click', async () => {
                 const newSettings = {
@@ -711,12 +1379,17 @@
                     opacity: parseInt(opacityRange.value),
                     brightness: parseInt(brightnessRange.value),
                     showTimetable: document.getElementById('showTimetableCheckbox').checked,
+                    enableCustomLayout: layoutCheckbox.checked,
                     contentOpacity: parseInt(contentOpacityRange.value),
-                    
-                    // フォント設定保存
                     fontFamily: document.getElementById('fontFamilySelect').value,
                     customFontName: document.getElementById('customFontNameInput').value,
-                    customFontUrl: document.getElementById('customFontUrlInput').value
+                    customFontUrl: document.getElementById('customFontUrlInput').value,
+                    // Dark Mode settings to save
+                    darkModeMode: modeSelect.value,
+                    darkModeBrightness: parseInt(dmBrightnessRange.value),
+                    darkModeContrast: parseInt(dmContrastRange.value),
+                    darkModeGrayscale: parseInt(dmGrayscaleRange.value),
+                    darkModeSepia: parseInt(dmSepiaRange.value)
                 };
                 
                 await saveSettings(newSettings);
@@ -726,24 +1399,26 @@
         }
         if (closeBtn) {
             closeBtn.addEventListener('click', async () => {
-                const settings = await getSettings(); // 保存されている設定を再読み込み
+                const settings = await getSettings(); 
                 applyHeaderStyles(settings); 
                 applyBackgroundStyle(settings);
                 applyContentOpacityStyle(settings.contentOpacity);
-                applyFontStyle(settings); // フォントも元に戻す
+                applyFontStyle(settings); 
+                applyDarkmodeStyle(settings); // Revert to saved Dark Mode settings
+                toggleDashboardLayout(settings.enableCustomLayout);
                 modal.style.display = 'none';
             });
         }
         if (resetBtn) {
             resetBtn.addEventListener('click', async () => {
-                if (confirm('全てのカスタム設定を初期値に戻しますか？（時間割の内容はリセットされません）')) {
+                const userConfirmed = confirm('全てのカスタム設定を初期値に戻しますか？（時間割の内容はリセットされません）');
+                if (userConfirmed) {
                     if (currentBG_BlobUrl) {
                        URL.revokeObjectURL(currentBG_BlobUrl);
                        currentBG_BlobUrl = null;
                     }
                     try {
                         localStorage.removeItem(FONT_CACHE_KEY);
-                        
                         if (db) {
                             const transaction = db.transaction([STORE_NAME], 'readwrite');
                             const store = transaction.objectStore(STORE_NAME);
@@ -759,6 +1434,9 @@
                     } catch (e) {
                         console.warn("Failed to clear IndexedDB:", e);
                     }
+                    
+                    // Disable DarkReader
+                    loadDarkReader({ darkModeMode: 'off' });
 
                     await saveSettings(DEFAULT_SETTINGS);
                     loadSettingsToForm(DEFAULT_SETTINGS);
@@ -768,6 +1446,46 @@
             });
         }
     }
+
+        function bindFoucProtectionOnNavigation() {
+    // Function to apply FOUC mask
+    const applyMask = () => {
+        document.documentElement.classList.add("dark-fouc-mask");
+        // Force scroll to top
+        window.scrollTo(0, 0); 
+    };
+
+    // Get main Moodle navigation elements
+    const selectors = [
+        'a[href*="course/view.php"]', // Course links
+        'a[href*="/my/"]',            // Dashboard links
+        'a[href*="/mod/"]',           // Activity links
+        '#nav-drawer a',              // Nav drawer links
+        '.list-group-item-action',    // List item links
+        '.navbar-nav .nav-link',      // Header links
+        'a.btn'                       // Button style links
+    ];
+
+    // Watch entire DOM to pick up lazy-loaded elements
+    document.addEventListener('click', (event) => {
+        let target = event.target.closest(selectors.join(','));
+        
+        if (target && target.tagName === 'A') {
+            const href = target.getAttribute('href');
+            // Ensure not an anchor or JS execution link within the same page
+            if (href && !href.startsWith('#') && !href.startsWith('javascript')) {
+                // Execute mask processing only if Dark Mode is enabled
+                if (document.documentElement.classList.contains("dark-fouc-mask") || 
+                    currentSettings.darkModeMode === 'on' || 
+                    (currentSettings.darkModeMode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+                ) {
+                    applyMask();
+                    // Allow default click action to proceed
+                }
+            }
+        }
+    }, true); // Capture event in capturing phase
+}
 
     async function handleFileSelection(file, type) {
         if (currentBG_BlobUrl) {
@@ -781,16 +1499,13 @@
              const blobUrl = URL.createObjectURL(file);
              currentBG_BlobUrl = blobUrl;
 
-             // グローバル設定（実行時）を更新
              currentSettings.backgroundUrl = blobUrl;
              currentSettings.backgroundType = type;
              
-             // 背景スライダーの値はそのままに、背景のみプレビュー
              applyBackgroundPreview();
              
              const modal = document.getElementById('custom-settings-modal');
              if (modal && modal.style.display === 'flex') {
-                 // 必要なUIだけをピンポイントで更新する
                  document.getElementById('currentBackgroundInfo').innerHTML = `<b>現在の背景</b>: ローカルファイル (IndexedDB経由・永続化済み)`;
                  document.getElementById('bg-type-video').checked = (type === 'video');
                  document.getElementById('bg-type-image').checked = (type === 'image');
@@ -804,7 +1519,7 @@
     }
 
 
-    // --- 動的スタイル適用 (Dynamic Styles) ---
+    // VI. Dynamic Style Application
 
     async function applyAllCustomStyles(reloadSettings = true) {
         if(reloadSettings) { 
@@ -812,18 +1527,30 @@
         }
 
         const settings = currentSettings;
-        
-        // フォント適用
         applyFontStyle(settings);
-
         injectBackgroundElements(); 
         applyHeaderStyles(settings); 
         applyBackgroundStyle(settings);
         applyContentOpacityStyle(settings.contentOpacity);
+        applyDarkmodeStyle(settings); // Apply Dark Mode itself
+        
+        injectDarkModeFixupStyles(); 
+        
+        toggleDashboardLayout(settings.enableCustomLayout);
         await renderTimetableWidget(); 
+
+        document.body.style.setProperty('visibility', 'visible', 'important');
+
+        // Dark Reader適用完了後、ローディング画面を削除
+        removeCustomLoadingScreen();
+    }
+    
+    // Call global function
+    function applyDarkmodeStyle(settings) {
+       // loadDarkReader calls global function
+       loadDarkReader(settings);
     }
 
-   // --- 機能: フォント適用関数 ---
     function applyFontStyle(settings) {
         let fontStyle = document.getElementById('custom-font-style');
         if (!fontStyle) {
@@ -832,7 +1559,6 @@
             (document.head || document.documentElement).appendChild(fontStyle);
         }
 
-        // フォント定義マップ
         const fontMap = {
             "default": { name: "", url: "" }, 
             "meiryo": { name: '"Meiryo", "メイリオ", "Hiragino Kaku Gothic ProN", sans-serif', url: "" },
@@ -841,33 +1567,26 @@
             "notosans": { name: '"Noto Sans JP", sans-serif', url: "https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" },
             "zenmaru": { name: '"Zen Maru Gothic", sans-serif', url: "https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap" },
             "sawarabi": { name: '"Sawarabi Mincho", serif', url: "https://fonts.googleapis.com/css2?family=Sawarabi+Mincho&display=swap" },
-            "dotgothic": { name: '"DotGothic16", sans-serif', url: "https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" },
             "mochiy": { name: '"Mochiy Pop One", sans-serif', url: "https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&display=swap" },
+            "dotgothic": { name: '"DotGothic16", sans-serif', url: "https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" },
             "rampart": { name: '"Rampart One", cursive', url: "https://fonts.googleapis.com/css2?family=Rampart+One&display=swap" },
-            "antique": { name: '"Zen Antique Soft", sans-serif', url: "https://fonts.googleapis.com/css2?family=Kiwi+Maru&family=Monomaniac+One&family=RocknRoll+One&family=Zen+Antique+Soft&display=swap" },
-            "RocknRoll": { name: '"RocknRoll One", sans-serif', url: "https://fonts.googleapis.com/css2?family=Kiwi+Maru&family=Monomaniac+One&family=RocknRoll+One&family=Zen+Antique+Soft&display=swap" }
         };
 
         let selectedFontFamily = "";
         let importUrl = "";
 
-        // 1. カスタム入力があれば最優先
         if (settings.customFontName && settings.customFontName.trim() !== "") {
             selectedFontFamily = `"${settings.customFontName}", sans-serif`;
             if (settings.customFontUrl && settings.customFontUrl.trim() !== "") {
                 importUrl = settings.customFontUrl;
             }
-        } 
-        // 2. プリセット選択
-        else if (fontMap[settings.fontFamily]) {
+        } else if (fontMap[settings.fontFamily]) {
             selectedFontFamily = fontMap[settings.fontFamily].name;
             importUrl = fontMap[settings.fontFamily].url;
         }
 
         let cssContent = "";
 
-        // ▼▼▼ 変更点1: フォントがある場合のみ、全体のフォントCSSを追加 ▼▼▼
-        // (以前はここで return していたため、下のバッジ用CSSが適用されなかった)
         if (selectedFontFamily) {
             if (importUrl) {
                 cssContent += `@import url('${importUrl}');\n`;
@@ -876,7 +1595,6 @@
                 body, div, p, span, a, li, td, th, h1, h2, h3, h4, h5, h6, button, input, textarea, select, .block, .card {
                     font-family: ${selectedFontFamily} !important;
                 }
-                /* アイコンフォント保護 */
                 .fa, .fa-*, .icon, [class*="icon"], .fa-solid, .fa-regular, .fa-brands {
                     font-family: "FontAwesome", "Font Awesome 6 Free", "Font Awesome 6 Brands" !important;
                 }
@@ -891,20 +1609,18 @@
                 font-family: -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif !important;
                 font-weight: bold !important;
                 font-size: 10px !important;
-                line-height: 16px !important;     /* ここを1.2から16pxに変更（高さと合わせて垂直中央揃えを確実に） */
-                letter-spacing: 0.5px !important; /* 少し文字間隔を広げてつぶれ防止 */
-                text-shadow: none !important;     /* 影を消してクッキリさせる */
+                line-height: 16px !important;
+                letter-spacing: 0.5px !important;
+                text-shadow: none !important;
                 display: inline-flex !important;
                 align-items: center !important;
                 justify-content: center !important;
                 min-width: 16px !important;
                 height: 16px !important;
-                padding: 0 4px !important;        /* パディングを微調整 */
-                border-radius: 10px !important;   /* 完全な丸みに */
+                padding: 0 4px !important;
+                border-radius: 10px !important;
                 box-sizing: border-box !important;
             }
-
-            /* 通知0件の非表示対応 */
             .count-container.hidden,
             [data-region="count-container"].hidden,
             .notification-count.hidden,
@@ -944,7 +1660,6 @@
                 color: ${settings.headerTextColor} !important;
                 text-shadow: none !important;
             }
-            
             button.github-btn-mangesh636 {
                  color: ${settings.headerTextColor} !important;
                  border: 1px solid ${settings.headerTextColor} !important;
@@ -959,27 +1674,55 @@
         const settings = { ...currentSettings, ...customOverride };
         const video = document.getElementById('background-video');
         const imageContainer = document.getElementById('background-image-container');
+
+        const dimOverlay = document.getElementById('background-dim-overlay'); 
+        
         const body = document.querySelector(BODY_SELECTOR);
 
         if (!body) return; 
 
         body.style.overflowX = 'hidden';
         const opacityValue = settings.opacity / 100;
-        const brightnessValue = settings.brightness / 100;
+        let overlayColor = 'rgba(0,0,0,0)';
+
+        if (dimOverlay) {
+            if (settings.brightness < 100) {
+                const alpha = (100 - settings.brightness) / 100;
+                overlayColor = `rgba(0, 0, 0, ${alpha})`;
+            } else if (settings.brightness > 100) {
+                const alpha = Math.min((settings.brightness - 100) / 100, 1);
+                overlayColor = `rgba(255, 255, 255, ${alpha})`;
+            }
+            dimOverlay.style.backgroundColor = overlayColor;
+        }
+        
+        // Determine background file URL (blob URL preferred, otherwise original URL)
+        const finalBackgroundUrl = settings.localBackgroundUrl || settings.backgroundUrl;
+        
+        // [Fix]: 
+        // 1. If background is "none" or file selected but not yet saved (blob URL missing), hide everything and exit
+        if (!finalBackgroundUrl || finalBackgroundUrl === 'indexeddb' && !settings.localBackgroundUrl) {
+            if (video) video.style.display = 'none';
+            if (imageContainer) imageContainer.style.display = 'none';
+            return; 
+        }
 
         if (video && imageContainer) {
-            if (settings.backgroundType === 'video' && settings.backgroundUrl) {
-                video.src = settings.backgroundUrl;
+            if (settings.backgroundType === 'video' && finalBackgroundUrl) {
+                video.src = finalBackgroundUrl; 
                 video.style.display = 'block';
                 video.style.opacity = opacityValue.toString();
-                video.style.filter = `brightness(${brightnessValue})`;
+                video.style.filter = 'none'; 
+                
                 imageContainer.style.display = 'none';
                 imageContainer.style.backgroundImage = 'none';
-            } else if (settings.backgroundType === 'image' && settings.backgroundUrl) {
-                imageContainer.style.backgroundImage = `url("${settings.backgroundUrl}")`;
+            } else if (settings.backgroundType === 'image' && finalBackgroundUrl) {
+                imageContainer.style.backgroundImage = `url("${finalBackgroundUrl}")`;
                 imageContainer.style.display = 'block';
                 imageContainer.style.opacity = opacityValue.toString();
-                imageContainer.style.filter = `brightness(${brightnessValue})`;
+                
+                imageContainer.style.filter = `brightness(${settings.brightness / 100})`;
+                
                 video.style.display = 'none';
                 video.src = '';
             } else {
@@ -1004,7 +1747,11 @@
             video.style.cssText = `
                 position: fixed; top: 0; left: 0; width: 100%; height: 100%;
                 object-fit: cover; z-index: -100; display: none;
-                transition: opacity 0.5s ease, filter 0.5s ease;
+                transition: opacity 0.5s ease;
+                will-change: transform, opacity;
+                transform: translate3d(0, 0, 0); 
+                backface-visibility: hidden;   
+                pointer-events: none;       
             `;
             document.body.prepend(video);
             video.oncanplaythrough = () => { video.play().catch(e => console.warn("Video autoplay blocked:", e)); };
@@ -1013,6 +1760,17 @@
                     console.error("Failed to load background VIDEO (Blob/IndexedDB).", e);
                 }
             };
+        }
+
+        if (!document.getElementById('background-dim-overlay')) {
+            const overlay = document.createElement('div');
+            overlay.id = 'background-dim-overlay';
+            overlay.style.cssText = `
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                pointer-events: none; z-index: -99; display: block;
+                transition: background-color 0.3s ease;
+            `;
+            document.body.prepend(overlay);
         }
 
         if (!document.getElementById('background-image-container')) {
@@ -1028,7 +1786,7 @@
         }
     }
 
-    function applyContentOpacityStyle(contentOpacity) {
+ function applyContentOpacityStyle(contentOpacity) {
         const opacityRatio = contentOpacity / 100;
 
         let contentStyle = document.getElementById('custom-content-style');
@@ -1038,33 +1796,725 @@
             (document.head || document.documentElement).appendChild(contentStyle);
         }
 
-        const widgetOpacity = Math.min(opacityRatio + 0.2, 1.0); 
+        const widgetOpacity = opacityRatio; 
+        const mainWrapperOpacity = opacityRatio;
 
-      contentStyle.innerHTML = `
-            .block, .card:not(.custom-card-style), .card-body, .card,
-            #secondary-navigation d-print-none, #page-content,
-            #region-main, #region-main-box, .bg-white, .main-inner {
-                background-color: rgba(255, 255, 255, ${opacityRatio}) !important;
+        // Color definitions
+        const lightColor = '255, 255, 255';
+        const darkColor = '24, 26, 27'; 
+
+        const lightBlockBg = `rgba(${lightColor}, ${opacityRatio})`;
+        const darkBlockBg = `rgba(${darkColor}, ${opacityRatio})`;
+        const lightWidgetBg = `rgba(${lightColor}, ${widgetOpacity})`;
+        const darkWidgetBg = `rgba(${darkColor}, ${widgetOpacity})`;
+        const lightWrapperBg = `rgba(${lightColor}, ${mainWrapperOpacity})`;
+        const darkWrapperBg = `rgba(${darkColor}, ${mainWrapperOpacity})`;
+
+        // Selector definitions
+        const blockSelectors = `
+             .block:not(#customTimetableWidget) .card-body,
+             .block:not(#customTimetableWidget) .card:not(.custom-card-style),
+             .block:not(#customTimetableWidget),
+             .course-section .section-item,
+             .list-group-item,
+             .list-group-item.list-group-item-action:active,
+             .block-myoverview .dropdown-menu,
+             .block_calendar_month .calendarmonth,
+             #customTimetableWidget .card-body,
+             .header.d-flex.flex-wrap.p-1,
+             .input-group.searchbar.w-100,
+             .mb-1.me-1.flex-grow-1,
+             .col-md-6.col-sm-8.col-12.mb-1.d-flex.justify-content-end.nav-search,
+             #calendar-course-filter-1,
+             .sr-only
+        `;
+        
+        const widgetCardSelectors = `
+            .card.custom-card-style, 
+            .block.card.custom-card-style
+        `;
+
+        contentStyle.innerHTML = `
+            /* =========================================
+               1. Light Mode (Default) Settings
+               ========================================= */
+            .main-inner {
+                background-color: ${lightWrapperBg} !important;
+                border-radius: 8px;
+                box-shadow: 0 0 15px rgba(0,0,0,0.1);
             }
-            .card.custom-card-style {
-                background-color: rgba(255, 255, 255, ${widgetOpacity}) !important;
+            ${blockSelectors} { 
+                background-color: ${lightBlockBg} !important;
+            }
+            ${widgetCardSelectors} {
+                background-color: ${lightWidgetBg} !important;
                 border: 1px solid rgba(255, 255, 255, 0.9) !important;
+            }
+
+            /* Fix quiz option alignment (Centering with Flexbox) */
+            .que .answer div.r0, 
+            .que .answer div.r1 {
+                display: flex !important;
+                align-items: center !important; /* Vertical center alignment */
+                margin-bottom: 6px !important;
+            }
+            .que .answer input[type="radio"], 
+            .que .answer input[type="checkbox"] {
+                margin-top: 0 !important;
+                margin-bottom: 0 !important;
+                margin-right: 8px !important; /* Spacing from label */
+                cursor: pointer;
+            }
+            .que .answer label {
+                margin-bottom: 0 !important;
+                line-height: 1.4 !important;
+                cursor: pointer;
+                padding-top: 2px !important; /* Font tweak */
+            }
+
+            /* Empty cells in timetable */
+            .timetable-empty-cell {
+                color: #ccc;
+                font-size: 1.2em;
+                display: block;
+                text-align: center;
+            }
+
+            /* Deadline card design in timetable */
+            .timetable-deadline-container {
+                margin-top: 6px;
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }
+            .timetable-deadline-card {
+                background-color: rgba(255, 255, 255, 0.7);
+                border-left: 3px solid #ccc;
+                padding: 4px 6px;
+                border-radius: 0 4px 4px 0;
+                font-size: 0.85em;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            }
+            .deadline-row-top {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 2px;
+            }
+            .deadline-name {
+                font-weight: bold;
+                color: #333;
+                font-size: 0.95em;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                max-width: 100%;
+            }
+            .deadline-row-bottom {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: 0.85em;
+            }
+            .deadline-date {
+                color: #888;
+                font-size: 0.8em;
+            }
+
+            /* Timer color settings (Light Mode) */
+            .timer-safe { color: #00796b !important; font-weight: bold; } 
+            .timer-warning { color: #f9a825 !important; font-weight: bold; } 
+            .timer-danger { color: #e64a19 !important; font-weight: bold; } 
+            .timer-critical { color: #d32f2f !important; font-weight: 900; } 
+            .timer-expired { color: #757575 !important; }
+
+            .timetable-deadline-card:has(.timer-safe) { border-left-color: #00796b; }
+            .timetable-deadline-card:has(.timer-warning) { border-left-color: #f9a825; }
+            .timetable-deadline-card:has(.timer-danger) { border-left-color: #e64a19; }
+            .timetable-deadline-card:has(.timer-critical) { border-left-color: #d32f2f; }
+
+
+            /* =========================================
+               2. Dark Mode (Enabled via Dark Reader) Settings
+               ========================================= */
+            html[data-darkreader-scheme="dark"] .main-inner {
+                background-color: ${darkWrapperBg} !important;
+                box-shadow: none !important;
+            }
+            
+            html[data-darkreader-scheme="dark"] .block:not(#customTimetableWidget) .card-body,
+            html[data-darkreader-scheme="dark"] .block:not(#customTimetableWidget) .card:not(.custom-card-style),
+            html[data-darkreader-scheme="dark"] .block:not(#customTimetableWidget),
+            html[data-darkreader-scheme="dark"] .course-section .section-item,
+            html[data-darkreader-scheme="dark"] .list-group-item,
+            html[data-darkreader-scheme="dark"] .list-group-item.list-group-item-action:active,
+            html[data-darkreader-scheme="dark"] .block-myoverview .dropdown-menu,
+            html[data-darkreader-scheme="dark"] .block_calendar_month .calendarmonth,
+            html[data-darkreader-scheme="dark"] #customTimetableWidget .card-body,
+            html[data-darkreader-scheme="dark"] .header.d-flex.flex-wrap.p-1,
+            html[data-darkreader-scheme="dark"] .input-group.searchbar.w-100,
+            html[data-darkreader-scheme="dark"] .mb-1.me-1.flex-grow-1,
+            html[data-darkreader-scheme="dark"] .col-md-6.col-sm-8.col-12.mb-1.d-flex.justify-content-end.nav-search,
+            html[data-darkreader-scheme="dark"] #calendar-course-filter-1,
+            html[data-darkreader-scheme="dark"] .sr-only {
+                background-color: ${darkBlockBg} !important;
+                color: #e8e6e3 !important; 
+            }
+
+            html[data-darkreader-scheme="dark"] .card.custom-card-style, 
+            html[data-darkreader-scheme="dark"] .block.card.custom-card-style {
+                background-color: ${darkWidgetBg} !important;
+                border: 1px solid rgba(255, 255, 255, 0.2) !important;
+            }
+
+            /* Dark Mode Text Color Fix */
+            
+            html[data-darkreader-scheme="dark"] #customTimetableWidget {
+                 color: #e0e0e0 !important;
+            }
+            
+            html[data-darkreader-scheme="dark"] .timetable-deadline-card {
+                background-color: rgba(50, 50, 50, 0.7) !important;
+                border-left: 3px solid #777 !important;
+            }
+            html[data-darkreader-scheme="dark"] #customTimetableWidget .deadline-name {
+                color: #ffffff !important; 
+            }
+            html[data-darkreader-scheme="dark"] #customTimetableWidget a {
+                color: #82b1ff !important;
+            }
+            
+            html[data-darkreader-scheme="dark"] #customTimetableTable th,
+            html[data-darkreader-scheme="dark"] #customTimetableTable td {
+                color: #cccccc !important;
+                border-bottom: 1px solid #444 !important;
+            }
+             html[data-darkreader-scheme="dark"] #customTimetableTable tr[style*="background-color: #f8f9fa"] {
+                background-color: rgba(255, 255, 255, 0.05) !important;
+            }
+
+            html[data-darkreader-scheme="dark"] #customTimetableWidget .deadline-date {
+                color: #aaa !important;
+            }
+            
+            /* Dim hyphens in empty cells */
+            html[data-darkreader-scheme="dark"] .timetable-empty-cell {
+                color: #555 !important;
+            }
+
+            /* Timer color settings (Dark Mode) */
+            html[data-darkreader-scheme="dark"] #customTimetableWidget .timer-safe { color: #80cbc4 !important; }
+            html[data-darkreader-scheme="dark"] #customTimetableWidget .timer-warning { color: #fff176 !important; }
+            html[data-darkreader-scheme="dark"] #customTimetableWidget .timer-danger { color: #ff8a80 !important; } 
+            html[data-darkreader-scheme="dark"] #customTimetableWidget .timer-critical { color: #ff5252 !important; } 
+            
+            html[data-darkreader-scheme="dark"] .timetable-deadline-card:has(.timer-safe) { border-left-color: #80cbc4 !important; }
+            html[data-darkreader-scheme="dark"] .timetable-deadline-card:has(.timer-warning) { border-left-color: #fff176 !important; }
+            html[data-darkreader-scheme="dark"] .timetable-deadline-card:has(.timer-danger) { border-left-color: #ff8a80 !important; }
+            html[data-darkreader-scheme="dark"] .timetable-deadline-card:has(.timer-critical) { border-left-color: #ff5252 !important; }
+
+
+            html[data-darkreader-scheme="dark"] .deadline-highlight {
+                background-color: rgba(100, 20, 20, 0.5) !important; 
+                border: 1px solid #ff6b6b !important; 
+                box-shadow: 0 0 10px rgba(255, 50, 50, 0.2) !important;
+                color: #ffcccc !important; 
+            }
+
+            /* =========================================
+               3. Forced Transparency Areas (Common)
+               ========================================= */
+            .bg-white,
+            .navbar, 
+            .secondary-navigation,
+            .primary-navigation,
+            .nav.more-nav,
+            .nav-tabs .nav-link,
+            .nav-tabs .nav-item,
+            .course-tabs,
+            .context-header-settings-menu,
+            .usermenu .dropdown-menu,
+            .course-content, 
+            #page-content,
+            #page,
+            #page-wrapper,
+            .main-content,
+            #region-main,
+            .pagelayout-mydashboard #region-main, 
+            #region-main-box > div:first-child,
+            .pagelayout-incourse .nav-tabs, 
+            .btn.btn-icon:not(.custom-card-style),
+            .coursemenubtn,
+            .activityiconcontainer,
+            .card-footer, 
+            .page-item, 
+            .pagination.mb-0, 
+            .pagination,
+            .card-body.pe-1.course-info-container,
+            .form-control.withclear.rounded,
+            .w-100
+             {
+                background-color: transparent !important;
+            }
+            
+            html[data-darkreader-scheme="dark"] .bg-white,
+            html[data-darkreader-scheme="dark"] .navbar,
+            html[data-darkreader-scheme="dark"] #page,
+            html[data-darkreader-scheme="dark"] #region-main,
+            html[data-darkreader-scheme="dark"] .w-100 {
+                background-color: transparent !important;
+            }
+
+            .section {
+                 border-bottom: none !important;
+                 margin-bottom: 1rem !important; 
+            }
+            .section-item {
+                border: 1px solid rgba(0, 0, 0, 0.05) !important;
+            }
+            html[data-darkreader-scheme="dark"] .section-item {
+                border: 1px solid rgba(255, 255, 255, 0.1) !important;
+
+                #customTimetableTable thead tr,
+            #customTimetableTable th,
+            #customTimetableTable td:first-child {
+                background-color: transparent !important;
             }
         `;
     }
 
 
-    function normalizeCourseName(name) {
-        if (typeof name !== 'string') return '';
-        return name
-            .normalize('NFKC') 
-            .replace(/\s| /g, '') 
-            .replace(/（.*）$|\(.*\)$/, ''); 
+    // VII. Timetable Feature
+
+    function createCourseDirectUrl(courseId) {
+        return `https://polite.do-johodai.ac.jp/moodle/course/view.php?id=${courseId}`;
     }
+
+    async function getTimetable() {
+        const data = await chrome.storage.local.get(TIMETABLE_STORAGE_KEY);
+        let timetable;
+        const stored = data[TIMETABLE_STORAGE_KEY];
+        
+        if (stored) {
+            try {
+                timetable = JSON.parse(stored);
+            } catch (e) {
+                timetable = DEFAULT_TIMETABLE;
+            }
+        }
+        return timetable || DEFAULT_TIMETABLE;
+    }
+
+    async function saveTimetable(timetable) {
+        await chrome.storage.local.set({ [TIMETABLE_STORAGE_KEY]: JSON.stringify(timetable) });
+    }
+
+    function getCurrentClassPeriod(timetable) {
+        const now = new Date();
+        const dayOfWeekName = DAY_MAP[now.getDay()];
+        const currentTime = now.getHours() * 100 + now.getMinutes();
+
+        for (const period of CLASS_TIMES) {
+            if (currentTime >= period.start && currentTime <= period.end) {
+                const periodNumber = period.period.toString();
+                if (timetable[dayOfWeekName] && timetable[dayOfWeekName][periodNumber]) {
+                    return { periodNumber, status: '授業中', course: timetable[dayOfWeekName][periodNumber] };
+                }
+                return { periodNumber, status: '空きコマ' };
+            }
+        }
+        
+        for (let i = 0; i < CLASS_TIMES.length - 1; i++) {
+            if (currentTime > CLASS_TIMES[i].end && currentTime < CLASS_TIMES[i+1].start) {
+                return { periodNumber: null, status: '休み時間' };
+            }
+        }
+        
+        return { periodNumber: null, status: '授業時間外' };
+    }
+
+  function generateWeeklyTimetableHtml(timetable, deadlines) {
+        const today = new Date();
+        const currentDayName = DAY_MAP[today.getDay()];
+        const { periodNumber: currentPeriod, status: currentStatus, course: currentCourse } = getCurrentClassPeriod(timetable);
+
+        let htmlContent = `
+            <div style="padding: 12px 15px;">
+                <h4 style="margin-top: 0; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 1.1rem; border-bottom: 2px solid #eee; padding-bottom: 8px;">
+                    週間時間割
+                    <button id="editTimetableBtn" style="font-size: 0.75em; padding: 5px 10px; border: 1px solid #ddd; background-color: #fff; cursor: pointer; border-radius: 4px; color: #555; transition: all 0.2s;">編集</button>
+                </h4>
+                <div style="font-size: 0.9em; font-weight: bold; margin-bottom: 15px;">
+                    現在:
+                    ${currentStatus === '授業中' ?
+                        `<span style="color: #dc3545;">${currentPeriod}講時 - ${currentCourse.name}</span> <a href="${createCourseDirectUrl(currentCourse.id)}" target="_self" style="font-size: 0.85em; margin-left: 10px; color: #007bff; text-decoration: none;">[コースへ]</a>` :
+                        `<span style="color: #6c757d;">${currentStatus} ${currentPeriod ? `(${currentPeriod}講時)` : ''}</span>`
+                    }
+                </div>
+                <table id="customTimetableTable" style="width: 100%; border-collapse: separate; border-spacing: 0; text-align: left; font-size: 0.9em; border: 1px solid #eee; border-radius: 6px; overflow: hidden;">
+                    <thead>
+                        <tr style="">
+                            <th style="padding: 8px; border-bottom: 1px solid #ddd; white-space: nowrap; color: #555;">時間</th>
+                            ${DAY_MAP.slice(1, 6).map(day =>
+                                `<th style="padding: 8px; border-bottom: 1px solid #ddd; text-align:center; width: 18%; color: #555; ${day === currentDayName ? 'background-color: rgba(220, 53, 69, 0.08); color: #dc3545; font-weight:bold;' : ''}">${day}</th>`
+                            ).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        for (const periodTime of CLASS_TIMES) {
+            const period = periodTime.period.toString();
+            
+            // Format start and end times
+            const startH = Math.floor(periodTime.start / 100);
+            const startM = (periodTime.start % 100).toString().padStart(2, '0');
+            const endH = Math.floor(periodTime.end / 100);
+            const endM = (periodTime.end % 100).toString().padStart(2, '0');
+            const timeStr = `${startH}:${startM}～${endH}:${endM}`;
+            
+           htmlContent += `<tr><td style="padding: 8px; border-bottom: 1px solid #eee; font-size: 0.85em; color: #777; background-color: transparent; white-space: nowrap;">${period}<br><span style="font-size:0.8em; opacity:0.8;">(${timeStr})</span></td>`;
+            for (let i = 1; i <= 5; i++) {
+                const dayName = DAY_MAP[i];
+                const course = timetable[dayName] ? timetable[dayName][period] : null;
+                const isCurrent = dayName === currentDayName && period === currentPeriod;
+                
+                const cellStyle = isCurrent 
+                    ? 'padding: 6px; background-color: rgba(230, 240, 255, 0.5); border-bottom: 1px solid #ddd; position: relative;' 
+                    : 'padding: 6px; border-bottom: 1px solid #eee; position: relative;';
+
+                htmlContent += `<td style="${cellStyle}">`;
+                if (course) {
+                    htmlContent += `<a href="${createCourseDirectUrl(course.id)}" target="_self" style="color: #0d6efd; text-decoration: none; display:block; font-weight: 600; font-size: 0.95em; margin-bottom: 4px;">${course.name}</a>`;
+
+                    const nTimetableName = normalizeCourseName(course.name);
+                    const safeDeadlines = deadlines || [];
+
+                    const relevantDeadlines = safeDeadlines
+                        .filter(d => {
+                            const nDeadlineName = normalizeCourseName(d.courseName);
+                            return nDeadlineName.includes(nTimetableName) || nTimetableName.includes(nDeadlineName);
+                        })
+                        .sort((a, b) => a.dueTimestamp - b.dueTimestamp); 
+
+                    if (relevantDeadlines.length > 0) {
+                        htmlContent += `<div class="timetable-deadline-container">`;
+                        relevantDeadlines.forEach(deadline => {
+                            htmlContent += `
+                                <div class="timetable-deadline-card">
+                                    <div class="deadline-row-top">
+                                        <span class="deadline-name">${deadline.assignmentName}</span>
+                                    </div>
+                                    <div class="deadline-row-bottom">
+                                        <span class="custom-countdown-timer deadline-timer" data-due-timestamp="${deadline.dueTimestamp}"></span>
+                                        <span class="deadline-date">${deadline.dueDateString}まで</span>
+                                    </div>
+                                </div>`;
+                        });
+                        htmlContent += '</div>';
+                    }
+
+                } else {
+                    // Fix: Removed centered dot and changed to hyphen with class
+                    htmlContent += `<span class="timetable-empty-cell">-</span>`;
+                }
+                htmlContent += `</td>`;
+            }
+            htmlContent += `</tr>`;
+        }
+        htmlContent += `
+                    </tbody>
+                </table>
+            </div>
+        `;
+        return htmlContent;
+    }
+
+    async function renderTimetableWidget() {
+        // If not dashboard or display setting is OFF, remove and exit
+        if (!document.URL.includes('/my/') || !currentSettings.showTimetable) {
+            const existingWidget = document.getElementById('customTimetableWidget');
+            if (existingWidget) existingWidget.remove();
+            return;
+        }
+
+        let widgetContainer = document.getElementById('customTimetableWidget');
+        // Parent element to insert timetable (block container in main dashboard area)
+        const targetParent = document.querySelector(DASHBOARD_REGION_SELECTOR); 
+
+        if (!targetParent) {
+             // Dashboard content area not yet loaded or running on course page
+             return; 
+        }
+
+        if (!widgetContainer) {
+            widgetContainer = document.createElement('div');
+            widgetContainer.id = 'customTimetableWidget';
+            widgetContainer.classList.add('card', 'mb-3', 'block', 'custom-card-style'); // blockクラスを追加
+            widgetContainer.style.cssText = 'box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); position: relative;';
+            
+            // Insert: Before timeline block or at top of block container
+            const timelineBlock = document.querySelector('.block_timeline');
+            if (timelineBlock) {
+                 targetParent.insertBefore(widgetContainer, timelineBlock);
+            } else {
+                 targetParent.prepend(widgetContainer);
+            }
+        }
+        
+        // Ensure timetable content is rendered before layout update
+        const timetable = await getTimetable();
+        let cardBody = widgetContainer.querySelector('.card-body');
+        
+        if (!cardBody) {
+             cardBody = document.createElement('div');
+             cardBody.classList.add('card-body');
+             widgetContainer.appendChild(cardBody);
+        }
+        
+        cardBody.innerHTML = generateWeeklyTimetableHtml(timetable, timelineDeadlines);
+        startCountdownTimers(); 
+        
+        const editBtn = document.getElementById('editTimetableBtn');
+        if (editBtn) {
+            editBtn.addEventListener('click', async () => {
+                scanCoursesFromPage();
+                let modal = document.getElementById('timetable-modal');
+                if (modal) modal.remove();
+                const latestTimetable = await getTimetable();
+                injectEditModal(latestTimetable);
+                document.getElementById('timetable-modal').style.display = 'flex';
+            });
+        }
+        
+        // Re-apply CSS to apply transparency to new widget
+        applyContentOpacityStyle(currentSettings.contentOpacity); 
+    }
+
+    // --- Timetable Edit Modal (Suggest & Export/Import) ---
+    function generateEditModalHtml(timetable) {
+        const days = DAY_MAP.slice(1, 6); 
+        const periods = CLASS_TIMES.map(t => t.period.toString());
+        let bodyHtml = `
+            <div class="modal-alert-message">
+                <strong>予測変換の候補が少ない場合:</strong>
+                <p style="margin: 5px 0 0 0; font-size:0.95em;">
+                    Moodleの仕様により、現在画面に表示されているコースしか取得できません。<br>
+                    編集ボタンを押す前に、ダッシュボードの「コース概要」の左下で「すべて表示」に切り替えてから、全コースを画面に表示させてください。
+                </p>
+            </div>
+            <p style="margin-bottom: 15px; font-size: 0.9em;">
+                <b>使い方:</b> 科目名を入力すると候補が表示されます。候補をクリックするとIDが自動入力されます。<br>
+                データが消えるのが心配な場合は「書き出し」でバックアップを保存してください。
+            </p>
+            <div id="timetable-edit-grid" style="display: grid; grid-template-columns: 80px repeat(5, 1fr); gap: 8px; font-size: 0.85em;">
+                <div style="font-weight: bold; text-align: center;">時間</div>
+                ${days.map(day => `<div style="font-weight: bold; text-align: center;">${day}</div>`).join('')}
+        `;
+
+        for (const period of periods) {
+            const periodTime = CLASS_TIMES.find(t => t.period.toString() === period);
+            
+            // Fix: Display end time in edit screen too
+            let timeStr = '';
+            if (periodTime) {
+                const startH = Math.floor(periodTime.start / 100);
+                const startM = (periodTime.start % 100).toString().padStart(2, '0');
+                const endH = Math.floor(periodTime.end / 100);
+                const endM = (periodTime.end % 100).toString().padStart(2, '0');
+                timeStr = `${startH}:${startM}～${endH}:${endM}`;
+            }
+
+            bodyHtml += `<div style="font-weight: bold; line-height: 1.2; text-align:center;">${period}<br><span style="font-size:0.75em">${timeStr}</span></div>`;
+
+            for (const day of days) {
+                const course = (timetable[day] && timetable[day][period]) ? timetable[day][period] : null;
+                bodyHtml += `
+                    <div class="input-wrapper-relative">
+                        <input type="text" class="course-name-input" data-day="${day}" data-period="${period}" id="name-${day}-${period}" placeholder="科目名" value="${course ? course.name : ''}" style="width: 100%; margin-bottom: 2px; padding: 4px; border:1px solid #ccc; border-radius:3px;" autocomplete="off">
+                        <ul class="suggestion-list" id="suggest-${day}-${period}"></ul>
+                        <input type="number" id="id-${day}-${period}" placeholder="ID" value="${course ? course.id : ''}" style="width: 100%; padding: 4px; border:1px solid #eee; border-radius:3px; font-size:0.9em; background:#f9f9f9;">
+                    </div>
+                `;
+            }
+        }
+        bodyHtml += `</div>`;
+
+        return `
+            <div id="timetable-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); z-index: 10000; display: none; justify-content: center; align-items: center;">
+                <div id="timetable-modal-content" style="background-color: white; padding: 25px; border-radius: 8px; width: 95%; max-width: 950px; max-height: 95%; box-shadow: 0 5px 15px rgba(0,0,0,0.5); position: relative; display: flex; flex-direction: column;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
+                        <h4 style="margin:0;">時間割編集</h4>
+                        <div>
+                            <button id="exportTimetableBtn" style="padding: 6px 12px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 5px; font-size: 0.9em;">
+                                <i class="fa fa-download"></i> 書き出し
+                            </button>
+                            <button id="importTimetableBtn" style="padding: 6px 12px; background-color: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
+                                <i class="fa fa-upload"></i> 読み込み
+                            </button>
+                            <input type="file" id="importTimetableInput" accept=".json" style="display:none;">
+                        </div>
+                    </div>
+                    
+                    <div style="overflow-y: auto; flex-grow: 1; padding-right: 5px;">
+                        ${bodyHtml}
+                    </div>
+                    
+                    <div style="margin-top: 20px; text-align: right; flex-shrink: 0; border-top: 1px solid #eee; padding-top: 15px;">
+                        <button id="saveTimetableBtn" style="padding: 10px 30px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; font-weight:bold;">
+                            保存して適用
+                        </button>
+                        <button id="closeTimetableModal" style="padding: 10px 20px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            キャンセル
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function injectEditModal(timetable) {
+        if (document.getElementById('timetable-modal')) return;
+        const modalHtml = generateEditModalHtml(timetable);
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+        const modal = document.getElementById('timetable-modal');
+        injectSuggestionStyles(); // サジェスト用CSSを注入
+        
+        // Save/Close buttons
+        document.getElementById('saveTimetableBtn').addEventListener('click', saveAndRenderTimetable);
+        document.getElementById('closeTimetableModal').addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+
+        // Feature: Backup (Export/Import)
+        document.getElementById('exportTimetableBtn').addEventListener('click', async () => {
+            const currentData = await getTimetable();
+            const jsonString = JSON.stringify(currentData, null, 2);
+            const blob = new Blob([jsonString], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "moodle_timetable_backup.json";
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        document.getElementById('importTimetableBtn').addEventListener('click', () => {
+            document.getElementById('importTimetableInput').click();
+        });
+
+        document.getElementById('importTimetableInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                try {
+                    const json = JSON.parse(event.target.result);
+                    await saveTimetable(json);
+                    alert('時間割データを読み込みました。画面を更新します。');
+                    modal.remove(); // Remove modal to regenerate
+                    injectEditModal(json); // Re-inject with new data
+                    document.getElementById('timetable-modal').style.display = 'flex';
+                } catch (err) {
+                    alert('ファイルの読み込みに失敗しました。正しいJSONファイルか確認してください。');
+                }
+            };
+            reader.readAsText(file);
+            e.target.value = ''; // リセット
+        });
+
+        // Event listener for suggest feature
+        const nameInputs = modal.querySelectorAll('.course-name-input');
+        nameInputs.forEach(input => {
+            const day = input.dataset.day;
+            const period = input.dataset.period;
+            const list = document.getElementById(`suggest-${day}-${period}`);
+            const idInput = document.getElementById(`id-${day}-${period}`);
+
+            // On input
+            input.addEventListener('input', () => {
+                const val = input.value.toLowerCase().trim();
+                if (val.length < 1) {
+                    list.style.display = 'none';
+                    return;
+                }
+
+                // Normalize input value
+                const normalizedQuery = normalizeCourseName(val);
+                
+                // Filter candidates
+                const matches = availableCourses.filter(c => {
+                    const normalizedCourseName = normalizeCourseName(c.name);
+                    // Check if normalized query is contained in normalized course name
+                    return normalizedCourseName.includes(normalizedQuery);
+                });
+                
+                if (matches.length > 0) {
+                    list.innerHTML = matches.map(c => `<li data-id="${c.id}" data-name="${c.name}">${c.name} <span style="color:#888; font-size:0.8em;">(ID:${c.id})</span></li>`).join('');
+                    list.style.display = 'block';
+                    
+                    // On candidate click
+                    const items = list.querySelectorAll('li');
+                    items.forEach(item => {
+                        item.addEventListener('click', () => {
+                            input.value = item.dataset.name;
+                            idInput.value = item.dataset.id;
+                            list.style.display = 'none';
+                        });
+                    });
+                } else {
+                    list.style.display = 'none';
+                }
+            });
+
+            // Hide on blur 
+            input.addEventListener('blur', () => {
+                setTimeout(() => { list.style.display = 'none'; }, 200);
+            });
+            
+            // Execute search on focus (redisplay)
+            input.addEventListener('focus', () => {
+                if(input.value.trim().length > 0) {
+                     input.dispatchEvent(new Event('input'));
+                }
+            });
+        });
+    }
+
+    async function saveAndRenderTimetable() {
+        const days = DAY_MAP.slice(1, 6); 
+        const periods = CLASS_TIMES.map(t => t.period.toString());
+        let newTimetable = {};
+
+        for (const day of days) {
+            newTimetable[day] = {};
+            for (const period of periods) {
+                const nameInput = document.getElementById(`name-${day}-${period}`);
+                const idInput = document.getElementById(`id-${day}-${period}`);
+                const name = nameInput ? nameInput.value.trim() : '';
+                const id = idInput ? idInput.value.trim() : ''; 
+
+                if (name && id && !isNaN(parseInt(id))) {
+                    newTimetable[day][period] = { name, id: parseInt(id) };
+                }
+            }
+        }
+        
+        newTimetable["土"] = {};
+        newTimetable["日"] = {};
+
+        await saveTimetable(newTimetable);
+        document.getElementById('timetable-modal').style.display = 'none';
+        await renderTimetableWidget();
+    }
+
+
+    // VIII. Timeline & Deadline Feature
 
     function formatRemainingTime(seconds) {
         if (seconds <= 0) {
-            return '<span style="color: #6c757d; font-weight: bold;">[ 期限切れ ]</span>';
+            return '<span class="timer-expired">[ 期限切れ ]</span>';
         }
 
         const d = Math.floor(seconds / (3600 * 24));
@@ -1073,25 +2523,28 @@
         const s = Math.floor(seconds % 60);
 
         let parts = [];
-        let color = '#333';
+        let urgencyClass = 'timer-safe'; // Default (safe)
 
         if (d > 0) {
             parts.push(`<b>${d}</b>日`);
             parts.push(`<b>${h}</b>時間`);
             parts.push(`<b>${m}</b>分`);
-            if (d <= 3) color = '#E67E22'; 
+            
+            // "Warning" if within 3 days, "Danger" if within 1 day
+            if (d <= 3) urgencyClass = 'timer-warning';
+            if (d <= 1) urgencyClass = 'timer-danger'; 
         } else if (h > 0) {
             parts.push(`<b>${h}</b>時間`);
             parts.push(`<b>${m}</b>分`);
             parts.push(`<b>${s}</b>秒`);
-            color = '#E67E22'; 
+            urgencyClass = 'timer-danger'; // Within 24 hours
         } else { 
             parts.push(`<b>${m}</b>分`);
             parts.push(`<b>${s}</b>秒`);
-            color = '#dc3545'; 
+            urgencyClass = 'timer-critical'; // Within 1 hour
         }
 
-        return `<span style="color: ${color}; font-weight: bold; font-size: 0.95em;">あと ${parts.join(' ')}</span>`;
+        return `<span class="${urgencyClass}">あと ${parts.join(' ')}</span>`;
     }
     
     function updateAllCountdownTimers() {
@@ -1125,11 +2578,14 @@
             clearInterval(countdownTimerInterval);
         }
         updateAllCountdownTimers();
-        countdownTimerInterval = setInterval(updateAllCountdownTimers, 1000);
+        countdownTimerInterval = setInterval(() => {
+        if (!document.hidden) { 
+            updateAllCountdownTimers();
+        }
+    }, 1000);
     }
 
-
-    // --- 機能: 期限タイムラインのパース ---
+    // --- Feature: Parse Timeline Deadlines ---
     function parseTimelineDeadlines() {
         timelineDeadlines = []; 
         
@@ -1144,8 +2600,9 @@
 
         dateGroups.forEach(dateGroup => {
             const dateTimestampSeconds = parseInt(dateGroup.getAttribute('data-timestamp'));
+            if (isNaN(dateTimestampSeconds)) return;
+
             const baseDate = new Date(dateTimestampSeconds * 1000);
-            
             const eventList = dateGroup.nextElementSibling;
             if (!eventList) return;
 
@@ -1153,38 +2610,48 @@
             
             items.forEach(item => {
                 try {
-                    const infoTextElement = item.querySelector('.event-name-container small.mb-0');
-                    if (!infoTextElement) return; 
-
-                    const infoText = infoTextElement.textContent || '';
-                    
-                    const isDue = infoText.includes('due') || infoText.includes('closes') ||
-                                  infoText.includes('提出期限') || infoText.includes('終了');
-                    
-                    if (!isDue) return; 
-
+                    // 1. Assignment Name
                     const assignmentLink = item.querySelector('.event-name-container a');
-                    const assignmentName = assignmentLink?.textContent.trim();
-                    
-                    if (!assignmentName) return; 
+                    if (!assignmentLink) return;
+                    const assignmentName = assignmentLink.textContent.trim();
 
-                    const courseNameMatch = infoText.match(/·\s*(.*)/);
-                    const courseName = courseNameMatch ? courseNameMatch[1].trim() : null;
+                    // 2. Get Course Name (Fix: flexible for centered dots/spaces)
+                    let courseName = null;
+                    const infoTextElement = item.querySelector('.event-name-container small.mb-0');
+                    
+                    if (infoTextElement) {
+                        const text = infoTextElement.textContent.trim();
+                        // Assume format "Assignment · Course Name", split by symbol and take the latter
+                        // Consider middot (U+00B7) or full-width middot
+                        const parts = text.split(/[·・]/); 
+                        if (parts.length > 1) {
+                            courseName = parts[parts.length - 1].trim();
+                        } else {
+                            // Use as is if cannot split
+                            courseName = text; 
+                        }
+                    }
 
                     if (!courseName) return; 
 
-                    const timeText = item.querySelector('.timeline-name > small.text-nowrap')?.textContent || '';
-                    const timeMatch = timeText.match(/(\d{1,2}):(\d{2})/);
-                    
+                    // 3. Get Time
+                    const timeElement = item.querySelector('.timeline-name > small.text-nowrap');
                     let hours = 0, minutes = 0;
-                    if (timeMatch) {
-                        hours = parseInt(timeMatch[1]);
-                        minutes = parseInt(timeMatch[2]);
+                    
+                    if (timeElement) {
+                        const timeText = timeElement.textContent.trim();
+                        const timeMatch = timeText.match(/(\d{1,2}):(\d{2})/);
+                        if (timeMatch) {
+                            hours = parseInt(timeMatch[1]);
+                            minutes = parseInt(timeMatch[2]);
+                        }
                     }
 
+                    // Calculate deadline date/time
                     const dueDateTime = new Date(baseDate.getTime());
                     dueDateTime.setHours(hours, minutes, 0, 0);
                     
+                    // Year crossover correction (treat as next year if more than 6 months ago)
                     if (dueDateTime.getMonth() < now.getMonth() - 6) { 
                          dueDateTime.setFullYear(currentYear + 1);
                     } else {
@@ -1192,7 +2659,8 @@
                     }
 
                     const dueTimestamp = Math.floor(dueDateTime.getTime() / 1000);
-                    const dueDateString = `${dueDateTime.getMonth() + 1}月${dueDateTime.getDate()}日 ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+                    // Create date string (e.g., 11/25 23:59)
+                    const dueDateString = `${dueDateTime.getMonth() + 1}/${dueDateTime.getDate()} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
                     
                     timelineDeadlines.push({
                         courseName: courseName, 
@@ -1202,13 +2670,15 @@
                     });
 
                 } catch (e) {
-                    console.warn("Deadline parse error:", e, item);
+                    console.warn("Deadline parse error:", e);
                 }
             });
         });
+        
+        // Debug: Output count found to console
+        console.log(`Moodle Customizer: ${timelineDeadlines.length} deadlines found.`, timelineDeadlines);
     }
 
-    // --- ★★★ 新しいポーリング関数 ★★★
     function startTimelinePoller() {
         if (timelinePoller) {
             clearInterval(timelinePoller);
@@ -1236,293 +2706,7 @@
         }, 200); 
     }
 
-    // --- 機能: 時間割 (Timetable Feature) ---
-
-    async function renderTimetableWidget() {
-        const targetRegion = document.querySelector(DASHBOARD_REGION_SELECTOR);
-        let widgetContainer = document.getElementById('customTimetableWidget');
-
-        if (!document.URL.includes('/my/') || !targetRegion) {
-            if (widgetContainer) widgetContainer.remove();
-            return;
-        }
-
-        if (currentSettings.showTimetable) {
-            const timetable = await getTimetable();
-            if (!widgetContainer) {
-                widgetContainer = document.createElement('div');
-                widgetContainer.id = 'customTimetableWidget';
-                widgetContainer.classList.add('card', 'mb-3', 'custom-card-style');
-                widgetContainer.style.cssText = 'box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); position: relative;';
-                widgetContainer.innerHTML = `
-                    <div class="card-header"><h5 class="mb-0">カスタム時間割</h5></div>
-                    <div class="card-body" style="padding: 0;"></div>
-                `;
-                targetRegion.prepend(widgetContainer);
-            }
-
-            const cardBody = widgetContainer.querySelector('.card-body');
-            if (cardBody) {
-                cardBody.innerHTML = generateWeeklyTimetableHtml(timetable, timelineDeadlines);
-                startCountdownTimers(); 
-                
-                const editBtn = document.getElementById('editTimetableBtn');
-                if (editBtn) {
-                    editBtn.addEventListener('click', async () => {
-                        let modal = document.getElementById('timetable-modal');
-                        if (modal) modal.remove();
-                        const latestTimetable = await getTimetable();
-                        injectEditModal(latestTimetable);
-                        document.getElementById('timetable-modal').style.display = 'flex';
-                    });
-                }
-            }
-        } else {
-            if (widgetContainer) widgetContainer.remove();
-        }
-    }
-
-    function createCourseDirectUrl(courseId) {
-        return `https://polite.do-johodai.ac.jp/moodle/course/view.php?id=${courseId}`;
-    }
-
-    async function getTimetable() {
-        const data = await chrome.storage.local.get(TIMETABLE_STORAGE_KEY);
-        let timetable;
-        const stored = data[TIMETABLE_STORAGE_KEY];
-        
-        if (stored) {
-            try {
-                timetable = JSON.parse(stored);
-            } catch (e) {
-                timetable = DEFAULT_TIMETABLE;
-            }
-        } else {
-            timetable = DEFAULT_TIMETABLE;
-            chrome.storage.local.set({ [TIMETABLE_STORAGE_KEY]: JSON.stringify(DEFAULT_TIMETABLE) });
-        }
-        return timetable;
-    }
-
-    async function saveTimetable(timetable) {
-        await chrome.storage.local.set({ [TIMETABLE_STORAGE_KEY]: JSON.stringify(timetable) });
-    }
-
-    function getCurrentClassPeriod(timetable) {
-        const now = new Date();
-        const dayOfWeekName = DAY_MAP[now.getDay()];
-        const currentTime = now.getHours() * 100 + now.getMinutes();
-
-        for (const period of CLASS_TIMES) {
-            if (currentTime >= period.start && currentTime <= period.end) {
-                const periodNumber = period.period.toString();
-                if (timetable[dayOfWeekName] && timetable[dayOfWeekName][periodNumber]) {
-                    return { periodNumber, status: '授業中', course: timetable[dayOfWeekName][periodNumber] };
-                }
-                return { periodNumber, status: '空きコマ' };
-            }
-        }
-        
-        for (let i = 0; i < CLASS_TIMES.length - 1; i++) {
-            if (currentTime > CLASS_TIMES[i].end && currentTime < CLASS_TIMES[i+1].start) {
-                return { periodNumber: null, status: '休み時間' };
-            }
-        }
-        
-        return { periodNumber: null, status: '授業時間外' };
-    }
-
-    function generateWeeklyTimetableHtml(timetable, deadlines) {
-        const today = new Date();
-        const currentDayName = DAY_MAP[today.getDay()];
-        const { periodNumber: currentPeriod, status: currentStatus, course: currentCourse } = getCurrentClassPeriod(timetable);
-
-        let htmlContent = `
-            <div style="padding: 15px;">
-                <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
-                    週間時間割
-                    <button id="editTimetableBtn" style="font-size: 0.7em; padding: 5px 10px; border: 1px solid #ccc; background-color: #f8f9fa; cursor: pointer; border-radius: 4px;">編集</button>
-                </h4>
-                <div style="font-size: 1.1em; font-weight: bold; margin-bottom: 10px;">
-                    現在:
-                    ${currentStatus === '授業中' ?
-                        `<span style="color: #dc3545;">${currentPeriod}講時 - ${currentCourse.name}</span> <a href="${createCourseDirectUrl(currentCourse.id)}" target="_self" style="font-size: 0.8em; margin-left: 10px;">[コースへ]</a>` :
-                        `<span style="color: #6c757d;">${currentStatus} ${currentPeriod ? `(${currentPeriod}講時)` : ''}</span>`
-                    }
-                </div>
-                <hr style="margin: 5px 0 15px 0;">
-                <table id="customTimetableTable" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.95em;">
-                    <thead>
-                        <tr>
-                            <th style="padding: 8px; border-bottom: 2px solid #ccc;">時間</th>
-                            ${DAY_MAP.slice(1, 6).map(day =>
-                                `<th style="padding: 8px; border-bottom: 1px solid #ccc; ${day === currentDayName ? 'color: #dc3545;' : ''}">${day}</th>`
-                            ).join('')}
-                        </tr>
-                    </thead>
-                    <tbody>
-        `;
-
-        for (const periodTime of CLASS_TIMES) {
-            const period = periodTime.period.toString();
-            const timeStr = `${Math.floor(periodTime.start / 100)}:${(periodTime.start % 100).toString().padStart(2, '0')}〜`;
-            htmlContent += `<tr><td style="padding: 8px; border-bottom: 1px solid #eee;">${period} (${timeStr})</td>`;
-
-            for (let i = 1; i <= 5; i++) {
-                const dayName = DAY_MAP[i];
-                const course = timetable[dayName] ? timetable[dayName][period] : null;
-                const isCurrent = dayName === currentDayName && period === currentPeriod;
-                const cellStyle = isCurrent ? 'background-color: rgba(14, 114, 181, 0.1); font-weight: bold; border-bottom: 3px solid #eee;' : 'border-bottom: 1px solid #eee;';
-
-                htmlContent += `<td style="padding: 8px; ${cellStyle}">`;
-                if (course) {
-                    htmlContent += `<a href="${createCourseDirectUrl(course.id)}" target="_self" style="color: #007bff; text-decoration: none;">${course.name}</a>`;
-
-                    const normalizedTimetableName = normalizeCourseName(course.name);
-
-                    const relevantDeadlines = deadlines
-                        .filter(d => {
-                            const normalizedDeadlineName = normalizeCourseName(d.courseName);
-                            return normalizedDeadlineName.includes(normalizedTimetableName);
-                        })
-                        .sort((a, b) => a.dueTimestamp - b.dueTimestamp); 
-
-                    if (relevantDeadlines.length > 0) {
-                        htmlContent += `
-                            <ul style="
-                                font-size: 0.85em; 
-                                color: #dc3545;
-                                margin: 5px 0 0 10px; 
-                                padding-left: 10px; 
-                                list-style-type: '!! ';
-                                line-height: 1.4;
-                                font-weight: 500;
-                            ">
-                        `;
-                        
-                        relevantDeadlines.forEach(deadline => {
-                            htmlContent += `<li>
-                                <b>${deadline.assignmentName}</b>
-                                <div 
-                                    class="custom-countdown-timer" 
-                                    data-due-timestamp="${deadline.dueTimestamp}"
-                                >
-                                    </div>
-                                <span style="display: block; font-size: 0.9em; color: #6c757d;">
-                                    (締め切り: ${deadline.dueDateString})
-                                </span>
-                            </li>`;
-                        });
-                        
-                        htmlContent += '</ul>';
-                    }
-
-                } else {
-                    htmlContent += `<span style="color: #6c757d;">-</span>`;
-                }
-                htmlContent += `</td>`;
-            }
-            htmlContent += `</tr>`;
-        }
-        htmlContent += `
-                    </tbody>
-                </table>
-                <p style="font-size: 0.8em; color: #999; margin-top: 20px;">※コース名をクリックすると直接コースページへ移動します。</p>
-            </div>
-        `;
-        return htmlContent;
-    }
-
-    function generateEditModalHtml(timetable) {
-        const days = DAY_MAP.slice(1, 6); 
-        const periods = CLASS_TIMES.map(t => t.period.toString());
-        let bodyHtml = `
-            <p style="margin-bottom: 15px;">科目名とMoodleのコースIDを入力してください。（IDはURL <code>course/view.php?id=XXX</code> のXXX部分です）</p>
-            <div id="timetable-edit-grid" style="display: grid; grid-template-columns: 80px repeat(5, 1fr); gap: 10px; font-size: 0.9em;">
-                <div style="font-weight: bold;">時間</div>
-                ${days.map(day => `<div style="font-weight: bold; text-align: center;">${day}</div>`).join('')}
-        `;
-
-        for (const period of periods) {
-            const periodTime = CLASS_TIMES.find(t => t.period.toString() === period);
-            const timeStr = periodTime ? `${Math.floor(periodTime.start / 100)}:${(periodTime.start % 100).toString().padStart(2, '0')}` : '';
-            bodyHtml += `<div style="font-weight: bold; line-height: 1.2;">${period}講時<br>(${timeStr})</div>`;
-
-            for (const day of days) {
-                const course = (timetable[day] && timetable[day][period]) ? timetable[day][period] : null;
-                bodyHtml += `
-                    <div>
-                        <input type="text" id="name-${day}-${period}" placeholder="科目名" value="${course ? course.name : ''}" style="width: 100%; margin-bottom: 5px; padding: 4px;">
-                        <input type="number" id="id-${day}-${period}" placeholder="コースID" value="${course ? course.id : ''}" style="width: 100%; padding: 4px;">
-                    </div>
-                `;
-            }
-        }
-        bodyHtml += `</div>`;
-
-        return `
-            <div id="timetable-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); z-index: 10000; display: none; justify-content: center; align-items: center;">
-                <div id="timetable-modal-content" style="background-color: white; padding: 30px; border-radius: 8px; width: 95%; max-width: 900px; max-height: 90%; box-shadow: 0 5px 15px rgba(0,0,0,0.5); position: relative; display: flex; flex-direction: column;">
-                    <h4 style="margin-top: 0; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
-                        時間割編集
-                    </h4>
-                    <div style="overflow-y: auto; flex-grow: 1;">
-                        ${bodyHtml}
-                    </div>
-                    <div style="margin-top: 20px; text-align: right; flex-shrink: 0;">
-                        <button id="saveTimetableBtn" style="padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
-                            保存
-                        </button>
-                        <button id="closeTimetableModal" style="padding: 10px 20px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                            閉じる
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    function injectEditModal(timetable) {
-        if (document.getElementById('timetable-modal')) return;
-        const modalHtml = generateEditModalHtml(timetable);
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-        const modal = document.getElementById('timetable-modal');
-        document.getElementById('saveTimetableBtn').addEventListener('click', saveAndRenderTimetable);
-        document.getElementById('closeTimetableModal').addEventListener('click', () => {
-            modal.style.display = 'none';
-        });
-    }
-
-    async function saveAndRenderTimetable() {
-        const days = DAY_MAP.slice(1, 6); 
-        const periods = CLASS_TIMES.map(t => t.period.toString());
-        let newTimetable = {};
-
-        for (const day of days) {
-            newTimetable[day] = {};
-            for (const period of periods) {
-                const nameInput = document.getElementById(`name-${day}-${period}`);
-                const idInput = document.getElementById(`id-${day}-${period}`);
-                const name = nameInput ? nameInput.value.trim() : '';
-                const id = idInput ? idInput.value.trim() : ''; 
-
-                if (name && id && !isNaN(parseInt(id))) {
-                    newTimetable[day][period] = { name, id: parseInt(id) };
-                }
-            }
-        }
-        
-        newTimetable["土"] = {};
-        newTimetable["日"] = {};
-
-        await saveTimetable(newTimetable);
-        document.getElementById('timetable-modal').style.display = 'none';
-        await renderTimetableWidget();
-    }
-
-
-    // --- 機能: 期限ハイライト ---
+    // --- Feature: Deadline Highlight ---
     function applyDeadlineHighlight() {
         if (!document.URL.includes('/my/')) return;
         const timelineBlock = document.querySelector('.block_timeline');
@@ -1544,7 +2728,7 @@
                 if (eventList) {
                     const deadlineItems = eventList.querySelectorAll('[data-region="event-list-item"]');
                     deadlineItems.forEach(item => {
-                        const infoText = item.querySelector('.timeline-name small.mb-0')?.textContent || '';
+                        const infoText = item.querySelector('.event-name-container small.mb-0')?.textContent || '';
                         const isDue = infoText.includes('due') || infoText.includes('closes') ||
                                      infoText.includes('提出期限') || infoText.includes('終了');
                         if (isDue) {
@@ -1556,254 +2740,9 @@
         });
     }
 
-    // --- 固定スタイル ---
-    function injectStaticStyles() {
-        const style = document.createElement('style');
-        style.innerHTML = `
-            /* ヘッダーの透明化 */
-            #page-header, .page-context-header, #page {
-                background-color: transparent !important;
-                border-bottom: none !important;
-            }
-
-            /* ヘッダーのドロップダウンなど */
-            .navbar-nav .nav-item .nav-link:hover,
-            .navbar-nav .nav-item.open > .nav-link {
-                background-color: rgba(0, 0, 0, 0.3) !important;
-                border-radius: 4px;
-            }
-            .navbar-nav .nav-item.dropdown .dropdown-menu {
-                background-color: #ffffff !important;
-                box-shadow: 0 5px 10px rgba(0,0,0,0.2);
-            }
-            .navbar-nav .nav-item.dropdown .dropdown-menu a.dropdown-item {
-                color: #000000 !important;
-                text-shadow: none !important;
-            }
-            .page-context-header .page-header-headings h1,
-            .page-context-header a {
-                color: #000000 !important;
-            }
-            #usernavigation .usermenu {
-                 display: flex;
-                 align-items: center;
-            }
-            #customSettingsBtn {
-                 margin-right: 5px;
-            }
-
-            /* 背景とコンテンツ */
-            ${BODY_SELECTOR} {
-                background-color: #f0f2f5 !important;
-                overflow-x: hidden !important;
-            }
-            #background-video, #background-image-container {
-                 transition: opacity 0.5s ease, filter 0.5s ease;
-            }
-            #page, ${PAGE_WRAPPER_SELECTOR} {
-                background-color: transparent !important;
-                z-index: 1;
-                position: relative;
-            }
-            .main-inner, .secondary-navigation d-print-none, .moremenu navigation observed, .nav more-nav nav-tabs, .card-footer border-0 bg-white w-100 {
-                background-color:  rgba(255, 255, 255, 1) !important;
-            }
-            :is(#secondary-navigation d-print-none, #page-content, #region-main, #region-main-box, .block) {
-                background-color: transparent !important;
-                z-index: 1;
-                position: relative;
-            }
-            .section {
-                 border-bottom: 2px solid rgba(255, 255, 255, 0.4) !important;
-                 margin-bottom: 10px !important;
-            }
-            .card-footer, .bg-white, .form-control, .page-item, .pagination mb-0, .pagination, .secondary-navigation, .secondary-navigation, .card-foote {
-                background-color: transparent !important;
-            }
-            :is(nav, .primary-navigation, .secondary-navigation, .nav, .nav-tabs, .moremenu, .course-section-header, .section-item) {
-                background-color: transparent !important;
-            }
-            .block * { color: #000000; }
-            .block a, .card a { color: #0d6efd; }
-
-            /* その他 */
-            .deadline-highlight {
-                border: 1px solid #ff4d4d !important;
-                background-color: rgba(255, 240, 240, 0.3) !important;
-                box-shadow: 0 0 8px rgba(255, 0, 0, 0.5) !important;
-            }
-            .block, .card:not(.custom-card-style) {
-                border: 0px solid rgba(255, 255, 255, 0.8) !important;
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-                transition: box-shadow 0.3s ease-in-out, background-color 0.3s ease;
-                z-index: 1;
-                position: relative;
-            }
-            .card.custom-card-style {
-                border: 1px solid rgba(255, 255, 255, 0.9) !important;
-            }
-            #customTimetableTable th {
-                 border-bottom-color: #aaa !important;
-                 border-bottom-width: 2px !important;
-                 border-left: 2px solid #ccc !important;
-            }
-            #customTimetableTable td {
-                 border-bottom-color: #f0f0f0 !important;
-                 border-bottom-width: 2px !important;
-                 border-left: 2px solid #f0f0f0 !important;
-            }
-            .section {
-                 border-bottom: 2px solid rgba(255, 255, 255, 0.4) !important;
-                 margin-bottom: 1px !important;
-            }
-            .section-item {
-                border: none !important;
-            }
-
-            /* ★★★ GitHub Button V2 Styles */
-            button.github-btn-mangesh636 {
-              background: transparent;
-              position: relative;
-              padding: 5px 10px; 
-              display: flex;
-              align-items: center;
-              font-size: 15px; 
-              font-weight: 600;
-              text-decoration: none;
-              cursor: pointer;
-              border: 1px solid rgb(36, 41, 46);
-              border-radius: 25px;
-              outline: none;
-              overflow: hidden;
-              color: rgb(36, 41, 46);
-              transition: color 0.3s 0.1s ease-out, border-color 0.3s 0.1s ease-out;
-              text-align: center;
-              height: 38px; 
-            }
-
-            button.github-btn-mangesh636 span {
-              margin: 0 5px; 
-            }
-
-            button.github-btn-mangesh636 svg {
-              transition: fill 0.3s 0.1s ease-out;
-            }
-
-            button.github-btn-mangesh636::before {
-              position: absolute;
-              top: 0;
-              left: 0;
-              right: 0;
-              bottom: 0;
-              margin: auto;
-              content: "";
-              border-radius: 50%;
-              display: block;
-              width: 20em;
-              height: 20em;
-              left: -5em;
-              text-align: center;
-              transition: box-shadow 0.5s ease-out;
-              z-index: -1;
-            }
-
-            button.github-btn-mangesh636:hover {
-              color: #fff !important; 
-              border: 1px solid rgb(36, 41, 46) !important;
-            }
-            
-            button.github-btn-mangesh636:hover svg {
-               fill: #fff !important; 
-            }
-
-            button.github-btn-mangesh636:hover::before {
-              box-shadow: inset 0 0 0 10em rgb(36, 41, 46);
-            }
-              /* --- Quiz Retake Mode Styles (v2) --- */
-            .retake-controls-card {
-                background-color: #ffffff;
-                border: 1px solid #ddd;
-                border-radius: 8px;
-                padding: 20px;
-                margin-bottom: 20px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-                position: relative; 
-            }
-            .retake-controls-card h4 {
-                margin-top: 0;
-                color: #005A9C; 
-                font-weight: 600;
-                border-bottom: 1px solid #eee;
-                padding-bottom: 10px;
-                margin-bottom: 10px;
-                display: flex;
-                align-items: center;
-                gap: 8px; 
-            }
-            .retake-controls-card p {
-                font-size: 0.95em;
-                color: #555;
-                margin-bottom: 20px;
-            }
-            .retake-controls-card .button-group {
-                display: flex;
-                gap: 12px;
-                flex-wrap: wrap;
-            }
-            .retake-btn {
-                padding: 10px 18px;
-                border: none;
-                border-radius: 5px;
-                cursor: pointer;
-                font-size: 0.95em; 
-                font-weight: 600; 
-                transition: all 0.2s ease;
-                text-decoration: none;
-                display: inline-flex; 
-                align-items: center;
-                gap: 6px; 
-                text-align: center;
-                line-height: 1.2;
-            }
-            .retake-btn-primary {
-                background-color: #007bff; 
-                color: white;
-            }
-            .retake-btn-primary:hover {
-                background-color: #0056b3;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.15);
-                transform: translateY(-1px);
-            }
-            .retake-btn-secondary {
-                background-color: #f8f9fa;
-                color: #333;
-                border: 1px solid #ccc;
-            }
-            .retake-btn-secondary:hover {
-                background-color: #e9ecef;
-                border-color: #bbb;
-            }
-            .retake-btn-exit {
-                position: absolute;
-                top: 15px;
-                right: 15px;
-                background: none;
-                border: none;
-                font-size: 1.5rem;
-                color: #888;
-                cursor: pointer;
-                padding: 5px;
-                line-height: 1;
-                transition: color 0.2s ease;
-            }
-            .retake-btn-exit:hover {
-                color: #333;
-            }
-        `;
-        (document.head || document.documentElement).appendChild(style);
-    }
-
-    // --- 機能: 小テスト解きなおし ---
+    // IX. Quiz Retake Feature
+     
+    // --- Feature: Quiz Retake ---
    function initQuizRetakeFeature() {
         if (!document.URL.includes('/mod/quiz/review.php') || document.getElementById('retake-controls')) {
             return;
@@ -1820,15 +2759,12 @@
 
         buttonContainer.innerHTML = `
             <button id="exitRetakeBtn" class="retake-btn-exit" title="解き直しを終了" style="display: none;">×</button>
-            
             <h4>解き直し学習モード</h4>
             <p>Moodleの成績には影響しません。何度でも問題を解き直して復習できます。</p>
-            
             <div class="button-group">
                 <button id="startRetakeBtn" class="retake-btn retake-btn-primary">
                 解き直しモードを開始
                 </button>
-                
                 <button id="gradeRetakeBtn" class="retake-btn retake-btn-primary" style="display: none;">
                 採点
                 </button>
@@ -1848,7 +2784,9 @@
     }
 
     function exitRetakeMode() {
-        if (confirm('解き直しモードを終了しますか？\n（ページがリロードされ、元のレビュー画面に戻ります）')) {
+        const userConfirmed = confirm('解き直しモードを終了しますか？\n（ページがリロードされ、元のレビュー画面に戻ります');
+        if (userConfirmed)
+        {
             window.location.reload();
         }
     }
@@ -2164,47 +3102,43 @@
             const createIcon = (isCorrect) => {
                  const iconClass = isCorrect ? 'fa-circle-check text-success' : 'fa-circle-xmark text-danger';
                  const title = isCorrect ? '正解' : '不正解';
-                 return `<span class="ms-1 retake-feedback-icon">
-                             <i class="icon fa-regular ${iconClass} fa-fw" title="${title}" role="img" aria-label="${title}"></i>
-                         </span>`;
+                 // Generate icon element
+                 const icon = document.createElement('span');
+                 icon.className = 'ms-1 retake-feedback-icon';
+                 icon.innerHTML = `<i class="icon fa-regular ${iconClass} fa-fw" title="${title}" role="img" aria-label="${title}"></i>`;
+                 return icon;
             };
 
-            if (correctData.type === 'multichoice') {
+            if (correctData.type === 'multichoice' || correctData.type === 'truefalse') {
                 const selectedInput = questionElement.querySelector(`input[name="${inputName}"]:checked`);
-                if (selectedInput && selectedInput.value === correctData.answer) {
-                    isCorrect = true;
-                }
-                const answerInputs = questionElement.querySelectorAll(`.answer input[name="${inputName}"]`);
-                answerInputs.forEach(input => {
+                const allAnswerInputs = questionElement.querySelectorAll(`.answer input[name="${inputName}"]`);
+                
+                isCorrect = (selectedInput && selectedInput.value === correctData.answer);
+
+                allAnswerInputs.forEach(input => {
                     const isThisTheCorrectAnswer = (input.value === correctData.answer);
                     const isThisTheSelectedAnswer = (selectedInput && input.value === selectedInput.value);
                     const labelDiv = input.closest('.r0, .r1');
+                    
                     if (!labelDiv) return;
-                    if (isThisTheCorrectAnswer) {
-                        labelDiv.insertAdjacentHTML('beforeend', createIcon(true));
-                    } else if (isThisTheSelectedAnswer && !isCorrect) {
-                        labelDiv.insertAdjacentHTML('beforeend', createIcon(false));
-                    }
-                });
 
-            } else if (correctData.type === 'truefalse') {
-                 const selectedInput = questionElement.querySelector(`input[name="${inputName}"]:checked`);
-                if (selectedInput && selectedInput.value === correctData.answer) {
-                    isCorrect = true;
-                }
-                const answerInputs = questionElement.querySelectorAll(`.answer input[name="${inputName}"]`);
-                answerInputs.forEach(input => {
-                    const isThisTheCorrectAnswer = (input.value === correctData.answer);
-                    const isThisTheSelectedAnswer = (selectedInput && input.value === selectedInput.value);
-                    const labelDiv = input.closest('.r0, .r1');
-                    if (!labelDiv) return;
+                    // Remove previous feedback icons (for re-grading scenarios)
+                    labelDiv.querySelectorAll('.retake-feedback-icon').forEach(icon => icon.remove());
+                    
                     if (isThisTheCorrectAnswer) {
-                        labelDiv.insertAdjacentHTML('beforeend', createIcon(true));
+                        // Add "Correct Icon" to correct option
+                        const icon = createIcon(true);
+                        labelDiv.appendChild(icon);
                     } else if (isThisTheSelectedAnswer && !isCorrect) {
-                         labelDiv.insertAdjacentHTML('beforeend', createIcon(false));
+                        // Add "Incorrect Icon" to incorrect option selected by user
+                        const icon = createIcon(false);
+                        labelDiv.appendChild(icon);
                     }
+                    
+                    // Disable input field itself (prevent changes after grading)
+                    input.disabled = true;
                 });
-
+                
             } else if (correctData.type === 'numerical' || correctData.type === 'shortanswer') {
                  const textInput = questionElement.querySelector(`input[name="${inputName}"]`);
                  const userAnswer = (textInput ? textInput.value.trim() : '');
@@ -2218,6 +3152,7 @@
                 if (textInput) {
                     textInput.classList.remove('correct', 'incorrect');
                     textInput.classList.add(isCorrect ? 'correct' : 'incorrect');
+                    textInput.disabled = true; // Disable after grading
                 }
                  
                  let iconElement = textInput ? textInput.nextElementSibling : null;
@@ -2256,6 +3191,7 @@
                         return; 
                     }
                     relevantSelects++;
+                    selectEl.disabled = true; // Disable after grading
 
                     const selectId = selectEl.id; 
                     const correctAnswerValue = correctData.answer[selectId];
@@ -2308,6 +3244,8 @@
                 }
 
                 selects.forEach(selectEl => {
+                    selectEl.disabled = true; // Disable after grading
+                    
                     const selectId = selectEl.id;
                     const correctAnswerValue = correctData.answer[selectId];
                     const userAnswerValue = selectEl.value;
@@ -2436,19 +3374,24 @@
                 </div>
             `;
             
-            if (Math.abs(totalMarks - earnedMarks) < 0.001) {
-                resultHTML += `<p style="color: #028dffff; font-weight: bold; font-size: 1.1em; margin-top: 1rem;">素晴らしい！全問正解です！</p>`;
-            } else {
-                 resultHTML += `<p style="color: #ff3131e1; font-size: 1.1em; margin-top: 1rem;">間違えた問題を確認して「リセット」でもう一度挑戦できます。</p>`;
+                if (Math.abs(totalMarks - earnedMarks) < 0.001) {
+                    resultHTML += `<p style="color: #028dffff; font-weight: bold; font-size: 1.1em; margin-top: 1rem;">素晴らしい！全問正解です！</p>
+                    <div style="text-align: center; margin-top: 15px;">
+                    <img src="https://placehold.co/150x150/dff4d8/357a32?text=PERFECT%21" alt="Perfect Score" style="border-radius: 50%; max-width: 100%;">
+                    </div>`;
+                } else {
+                    resultHTML += `<p style="color: #ff3131e1; font-size: 1.1em; margin-top: 1rem;">間違えた問題を確認して「リセット」でもう一度挑戦できます。</p>`;
+                }
+                
+                resultEl.innerHTML = resultHTML;
+
+                    retakeStartTime = new Date(); 
+                }
             }
-            
-            resultEl.innerHTML = resultHTML;
 
-            retakeStartTime = new Date(); 
-        }
-    }
 
-    // --- 実行 (即時実行) ---
-    init(); 
+            document.addEventListener('DOMContentLoaded', () => {
+            init();
+    });
 
 })();
