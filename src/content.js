@@ -1899,7 +1899,7 @@ async function init() {
                 flex-direction: column;
                 gap: 4px;
                 max-width: 100%;
-                overflow: hidden; /* コンテナからはみ出さない */
+                overflow: hidden; 
             }
 
             .timetable-deadline-card {
@@ -1909,15 +1909,15 @@ async function init() {
                 border-radius: 0 4px 4px 0;
                 font-size: 0.85em;
                 box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-                max-width: 100%; /* カード幅を親要素に制限 */
-                overflow: hidden; /* はみ出し防止 */
+                max-width: 100%; 
+                overflow: hidden;
             }
             .deadline-row-top {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
                 margin-bottom: 2px;
-                min-width: 0; /* Flex子要素の縮小を許可 */
+                min-width: 0; 
             }
             .deadline-name {
                 font-weight: bold;
@@ -2044,9 +2044,9 @@ async function init() {
                 color: #ffcccc !important; 
             }
 
-            /* =========================================
-               3. Forced Transparency Areas (Common)
-               ========================================= */
+        
+            /*3. Forced Transparency Areas (Common)*/
+
             .bg-white,
             .navbar, 
             .secondary-navigation,
@@ -2095,12 +2095,14 @@ async function init() {
             .section-item {
                 border: 1px solid rgba(0, 0, 0, 0.05) !important;
             }
+           
             html[data-darkreader-scheme="dark"] .section-item {
                 border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            }
 
-                #customTimetableTable thead tr,
-            #customTimetableTable th,
-            #customTimetableTable td:first-child {
+            html[data-darkreader-scheme="dark"] #customTimetableTable thead tr,
+            html[data-darkreader-scheme="dark"] #customTimetableTable th,
+            html[data-darkreader-scheme="dark"] #customTimetableTable td:first-child {
                 background-color: transparent !important;
             }
         `;
