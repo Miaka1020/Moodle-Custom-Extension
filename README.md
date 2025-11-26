@@ -120,7 +120,10 @@ https://chromewebstore.google.com/detail/plihohicbpnimfimobapbjeebebabjja?utm_so
 * UIなど修正
 
 ### v4.1
-* カスタム設定をクリックできないバグを修正 
+* カスタム設定をクリックできないバグを修正
+
+### v4.2
+* 時間割ウィジェットにおいて、課題名が長い場合にレイアウトが崩れる不具合を修正しました。
 ---
 
 ## 開発者
