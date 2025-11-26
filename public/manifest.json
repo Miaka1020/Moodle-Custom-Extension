@@ -1,7 +1,7 @@
 {
-    "manifest_version": 4.0,
+    "manifest_version": 3,
     "name": "Custom-POLITE(moodle)",
-    "version": "3",
+    "version": "4.1",
     "description": "北海道情報大学のPOLITEに機能を追加",
     "icons": {
         "16": "icon16.png",

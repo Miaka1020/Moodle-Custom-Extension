@@ -124,57 +124,8 @@
     } catch(e) {
         // Error likely in dev environment, ignoring
     }
-    
-    // II. Dark Mode Core Functions & Helpers
-     
-    /**
-     * Inject Dark Reader library and settings bridge into the page.
-     */
-    function injectDarkReaderLogic(settings) {
-        
-        // 1. Embed settings data as DOM element
-        let settingsData = document.getElementById('darkreader-settings-data');
-        if (!settingsData) {
-            settingsData = document.createElement('script');
-            settingsData.id = 'darkreader-settings-data';
-            settingsData.type = 'application/json';
-            document.head.appendChild(settingsData);
-        }
-        settingsData.textContent = JSON.stringify(settings);
-        
-        // 2. Inject Dark Reader library (only once)
-        let drLibScript = document.getElementById('darkreader-library-script');
-        if (!drLibScript) {
-            drLibScript = document.createElement('script');
-            drLibScript.id = 'darkreader-library-script';
-            drLibScript.src = chrome.runtime.getURL("darkreader.js"); 
-            drLibScript.setAttribute('data-skip-loader', 'true'); 
-            document.head.appendChild(drLibScript);
-        }
-        
-        // 3. Inject bridge script for initialization and settings application (runs every time)
-        let initScript = document.getElementById('dr-init-bridge-script');
-        if(initScript) {
-            initScript.remove(); 
-        }
-        
-        initScript = document.createElement('script');
-        initScript.id = 'dr-init-bridge-script';
-        initScript.src = chrome.runtime.getURL("dr_init_bridge.js");
-        document.head.appendChild(initScript);
-    }
 
-    /**
-     * Trigger Dark Mode settings application.
-     */
-    function loadDarkReader(settings) {
-       injectDarkReaderLogic(settings);
-    }
-
-    /**
-     * Fix: Inject custom loading screen (Renewed version)
-     */
-    function injectCustomLoadingScreen() {
+     function injectCustomLoadingScreen() {
         if (!document.getElementById('moodle-custom-loading-screen')) {
             const loadingScreen = document.createElement('div');
             loadingScreen.id = 'moodle-custom-loading-screen';
@@ -193,43 +144,41 @@
             document.body.appendChild(loadingScreen);
         }
     }
-
+    // II. Dark Mode Core Functions & Helpers
+     
     /**
-     * Fix: Remove custom loading screen (with fade-out)
+     * Inject Dark Reader library and settings bridge into the page.
      */
-   function removeCustomLoadingScreen() {
+    function removeCustomLoadingScreen() {
     const customLoadingScreen = document.getElementById('moodle-custom-loading-screen');
     if (!customLoadingScreen) return;
 
     const elapsedTime = Date.now() - loadStartTime;
     const remainingTime = MIN_LOAD_DURATION_MS - elapsedTime;
 
-    // If minimum wait time remains, wait before retrying removal
     if (remainingTime > 0) {
         setTimeout(() => {
-            // Execute again (remainingTime should be <= 0)
             removeCustomLoadingScreen(); 
         }, remainingTime);
         return;
     }
 
-    // If minimum wait time met, start fade-out
+    customLoadingScreen.style.pointerEvents = 'none';
+
     customLoadingScreen.style.opacity = '0'; // Start fade-out
     setTimeout(() => {
         customLoadingScreen.remove();
-    }, 300); // CSS transition time (0.3s)
+    }, 300);
 
-    // Remove existing dark mode loading screen (if any)
     const oldLoadingScreen = document.getElementById('darkmode-loading-screen');
     if (oldLoadingScreen) {
+        oldLoadingScreen.style.pointerEvents = 'none'; 
         oldLoadingScreen.style.opacity = '0';
         setTimeout(() => {
             oldLoadingScreen.remove();
         }, 300);
     }
     
-    // Remove FOUC protection class upon load completion (execute as soon as visibility becomes visible)
-    // Since extreme FOUC protection (at top of file) is used, removing class here displays the screen
     document.documentElement.classList.remove("dark-fouc-mask");
 }
 
@@ -281,6 +230,47 @@
             }
         `;
         fixStyle.textContent = fixupCss;
+    }
+
+    function injectDarkReaderLogic(settings) {
+        
+        // 1. Embed settings data as DOM element
+        let settingsData = document.getElementById('darkreader-settings-data');
+        if (!settingsData) {
+            settingsData = document.createElement('script');
+            settingsData.id = 'darkreader-settings-data';
+            settingsData.type = 'application/json';
+            document.head.appendChild(settingsData);
+        }
+        settingsData.textContent = JSON.stringify(settings);
+        
+        // 2. Inject Dark Reader library (only once)
+        let drLibScript = document.getElementById('darkreader-library-script');
+        if (!drLibScript) {
+            drLibScript = document.createElement('script');
+            drLibScript.id = 'darkreader-library-script';
+            drLibScript.src = chrome.runtime.getURL("darkreader.js"); 
+            drLibScript.setAttribute('data-skip-loader', 'true'); 
+            document.head.appendChild(drLibScript);
+        }
+        
+        // 3. Inject bridge script for initialization and settings application (runs every time)
+        let initScript = document.getElementById('dr-init-bridge-script');
+        if(initScript) {
+            initScript.remove(); 
+        }
+        
+        initScript = document.createElement('script');
+        initScript.id = 'dr-init-bridge-script';
+        initScript.src = chrome.runtime.getURL("dr_init_bridge.js");
+        document.head.appendChild(initScript);
+    }
+
+    /**
+     * Trigger Dark Mode settings application.
+     */
+    function loadDarkReader(settings) {
+       injectDarkReaderLogic(settings);
     }
 
 
@@ -886,7 +876,9 @@ async function init() {
                 modal = document.getElementById('custom-settings-modal');
             }
             loadSettingsToForm(settings);
+            
             modal.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
         });
     }
 
@@ -1078,8 +1070,14 @@ async function init() {
             .modern-modal-overlay { 
                 position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
                 background-color: rgba(0, 0, 0, 0.5); 
-                z-index: 10001; display: none; justify-content: center; align-items: center; 
-                animation: fadeIn 0.2s ease; 
+                z-index: 2147483647; 
+                display: none; 
+                justify-content: center; align-items: center; 
+                animation: fadeIn 0.2s ease;
+                
+                /* 【修正点】イベント透過防止とスクロール連鎖防止 */
+                pointer-events: auto !important;
+                overscroll-behavior: contain;
             }
             .modern-modal-content { 
                 background: #ffffff; 
@@ -1089,7 +1087,11 @@ async function init() {
                 border: 1px solid #e0e0e0; 
                 display: flex; flex-direction: column; font-family: 'Segoe UI', sans-serif; 
                 overflow: hidden; 
+                
+                /* 【修正点】コンテンツ自体のイベントを確実に有効化 */
+                pointer-events: auto !important;
             }
+            /* ... (以下、元のCSSと同じため省略なしで記述する場合は元のコードを使用) ... */
             .modern-modal-header { 
                 padding: 15px 25px; 
                 background: #f8f9fa; 
@@ -1394,6 +1396,7 @@ async function init() {
                 
                 await saveSettings(newSettings);
                 modal.style.display = 'none';
+                document.body.style.overflow = '';
                 applyAllCustomStyles(true); 
             });
         }
@@ -1407,8 +1410,17 @@ async function init() {
                 applyDarkmodeStyle(settings); // Revert to saved Dark Mode settings
                 toggleDashboardLayout(settings.enableCustomLayout);
                 modal.style.display = 'none';
+                document.body.style.overflow = '';
             });
         }
+
+        const modalContent = document.getElementById('custom-settings-content');
+        if (modalContent) {
+            modalContent.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+        }
+
         if (resetBtn) {
             resetBtn.addEventListener('click', async () => {
                 const userConfirmed = confirm('全てのカスタム設定を初期値に戻しますか？（時間割の内容はリセットされません）');
@@ -1886,7 +1898,10 @@ async function init() {
                 display: flex;
                 flex-direction: column;
                 gap: 4px;
+                max-width: 100%;
+                overflow: hidden; /* コンテナからはみ出さない */
             }
+
             .timetable-deadline-card {
                 background-color: rgba(255, 255, 255, 0.7);
                 border-left: 3px solid #ccc;
@@ -1894,12 +1909,15 @@ async function init() {
                 border-radius: 0 4px 4px 0;
                 font-size: 0.85em;
                 box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+                max-width: 100%; /* カード幅を親要素に制限 */
+                overflow: hidden; /* はみ出し防止 */
             }
             .deadline-row-top {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
                 margin-bottom: 2px;
+                min-width: 0; /* Flex子要素の縮小を許可 */
             }
             .deadline-name {
                 font-weight: bold;
@@ -1909,16 +1927,21 @@ async function init() {
                 overflow: hidden;
                 text-overflow: ellipsis;
                 max-width: 100%;
+                display: block; 
+                flex: 1; /* 余白を埋める */
             }
             .deadline-row-bottom {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
                 font-size: 0.85em;
+                margin-top: 2px;
             }
             .deadline-date {
                 color: #888;
                 font-size: 0.8em;
+                white-space: nowrap;
+                margin-left: 5px;
             }
 
             /* Timer color settings (Light Mode) */
@@ -2151,12 +2174,12 @@ async function init() {
                         `<span style="color: #6c757d;">${currentStatus} ${currentPeriod ? `(${currentPeriod}講時)` : ''}</span>`
                     }
                 </div>
-                <table id="customTimetableTable" style="width: 100%; border-collapse: separate; border-spacing: 0; text-align: left; font-size: 0.9em; border: 1px solid #eee; border-radius: 6px; overflow: hidden;">
+                <table id="customTimetableTable" style="table-layout: fixed; width: 100%; border-collapse: separate; border-spacing: 0; text-align: left; font-size: 0.9em; border: 1px solid #eee; border-radius: 6px; overflow: hidden;">
                     <thead>
                         <tr style="">
-                            <th style="padding: 8px; border-bottom: 1px solid #ddd; white-space: nowrap; color: #555;">時間</th>
+                            <th style="padding: 8px; border-bottom: 1px solid #ddd; white-space: nowrap; color: #555; width: 7%;">時間</th>
                             ${DAY_MAP.slice(1, 6).map(day =>
-                                `<th style="padding: 8px; border-bottom: 1px solid #ddd; text-align:center; width: 18%; color: #555; ${day === currentDayName ? 'background-color: rgba(220, 53, 69, 0.08); color: #dc3545; font-weight:bold;' : ''}">${day}</th>`
+                                `<th style="padding: 8px; border-bottom: 1px solid #ddd; text-align:center; width: 18.6%; color: #555; ${day === currentDayName ? 'background-color: rgba(220, 53, 69, 0.08); color: #dc3545; font-weight:bold;' : ''}">${day}</th>`
                             ).join('')}
                         </tr>
                     </thead>
@@ -2180,12 +2203,12 @@ async function init() {
                 const isCurrent = dayName === currentDayName && period === currentPeriod;
                 
                 const cellStyle = isCurrent 
-                    ? 'padding: 6px; background-color: rgba(230, 240, 255, 0.5); border-bottom: 1px solid #ddd; position: relative;' 
-                    : 'padding: 6px; border-bottom: 1px solid #eee; position: relative;';
+                    ? 'padding: 6px; background-color: rgba(230, 240, 255, 0.5); border-bottom: 1px solid #ddd; position: relative; vertical-align: top;' 
+                    : 'padding: 6px; border-bottom: 1px solid #eee; position: relative; vertical-align: top;';
 
                 htmlContent += `<td style="${cellStyle}">`;
                 if (course) {
-                    htmlContent += `<a href="${createCourseDirectUrl(course.id)}" target="_self" style="color: #0d6efd; text-decoration: none; display:block; font-weight: 600; font-size: 0.95em; margin-bottom: 4px;">${course.name}</a>`;
+                    htmlContent += `<a href="${createCourseDirectUrl(course.id)}" target="_self" title="${course.name}" style="color: #0d6efd; text-decoration: none; display:block; font-weight: 600; font-size: 0.95em; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${course.name}</a>`;
 
                     const nTimetableName = normalizeCourseName(course.name);
                     const safeDeadlines = deadlines || [];
@@ -2200,10 +2223,10 @@ async function init() {
                     if (relevantDeadlines.length > 0) {
                         htmlContent += `<div class="timetable-deadline-container">`;
                         relevantDeadlines.forEach(deadline => {
-                            htmlContent += `
+                           htmlContent += `
                                 <div class="timetable-deadline-card">
                                     <div class="deadline-row-top">
-                                        <span class="deadline-name">${deadline.assignmentName}</span>
+                                        <span class="deadline-name" title="${deadline.assignmentName}">${deadline.assignmentName}</span>
                                     </div>
                                     <div class="deadline-row-bottom">
                                         <span class="custom-countdown-timer deadline-timer" data-due-timestamp="${deadline.dueTimestamp}"></span>
@@ -2215,7 +2238,6 @@ async function init() {
                     }
 
                 } else {
-                    // Fix: Removed centered dot and changed to hyphen with class
                     htmlContent += `<span class="timetable-empty-cell">-</span>`;
                 }
                 htmlContent += `</td>`;
