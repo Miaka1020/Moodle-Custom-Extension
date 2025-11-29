@@ -121,7 +121,7 @@ https://chromewebstore.google.com/detail/plihohicbpnimfimobapbjeebebabjja?utm_so
 
 ### v4.1
 * カスタム設定をクリックできないバグを修正
-### v4,2
+### v4.2
 * 時間割のuiを修正
 ---
 
