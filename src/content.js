@@ -1894,54 +1894,60 @@ async function init() {
 
             /* Deadline card design in timetable */
             .timetable-deadline-container {
-                margin-top: 6px;
+                margin-top: 4px; 
                 display: flex;
                 flex-direction: column;
-                gap: 4px;
+                gap: 2px; 
                 max-width: 100%;
-                overflow: hidden; /* コンテナからはみ出さない */
+                overflow: hidden; 
             }
 
             .timetable-deadline-card {
                 background-color: rgba(255, 255, 255, 0.7);
                 border-left: 3px solid #ccc;
-                padding: 4px 6px;
+                padding: 2px 4px; 
                 border-radius: 0 4px 4px 0;
-                font-size: 0.85em;
+                font-size: 0.75em; 
                 box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-                max-width: 100%; /* カード幅を親要素に制限 */
-                overflow: hidden; /* はみ出し防止 */
+                max-width: 100%; 
+                overflow: hidden;
+                line-height: 1.2;
             }
             .deadline-row-top {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 2px;
-                min-width: 0; /* Flex子要素の縮小を許可 */
+                display: block;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                margin-bottom: 1px;
+                width: 100%;
             }
             .deadline-name {
                 font-weight: bold;
                 color: #333;
-                font-size: 0.95em;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                max-width: 100%;
-                display: block; 
-                flex: 1; /* 余白を埋める */
+                font-size: 1em;
+                display: inline; 
             }
             .deadline-row-bottom {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                font-size: 0.85em;
-                margin-top: 2px;
+                font-size: 0.9em;
+                margin-top: 0;
+                white-space: nowrap; 
             }
             .deadline-date {
                 color: #888;
-                font-size: 0.8em;
+                font-size: 0.9em;
                 white-space: nowrap;
-                margin-left: 5px;
+                margin-left: auto; 
+            }
+            
+            .custom-countdown-timer {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                max-width: 65%;
+                display: inline-block;
             }
 
             /* Timer color settings (Light Mode) */
@@ -2044,9 +2050,9 @@ async function init() {
                 color: #ffcccc !important; 
             }
 
-            /* =========================================
-               3. Forced Transparency Areas (Common)
-               ========================================= */
+        
+            /*3. Forced Transparency Areas (Common)*/
+
             .bg-white,
             .navbar, 
             .secondary-navigation,
@@ -2095,12 +2101,14 @@ async function init() {
             .section-item {
                 border: 1px solid rgba(0, 0, 0, 0.05) !important;
             }
+           
             html[data-darkreader-scheme="dark"] .section-item {
                 border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            }
 
-                #customTimetableTable thead tr,
-            #customTimetableTable th,
-            #customTimetableTable td:first-child {
+            html[data-darkreader-scheme="dark"] #customTimetableTable thead tr,
+            html[data-darkreader-scheme="dark"] #customTimetableTable th,
+            html[data-darkreader-scheme="dark"] #customTimetableTable td:first-child {
                 background-color: transparent !important;
             }
         `;
@@ -2177,9 +2185,9 @@ async function init() {
                 <table id="customTimetableTable" style="table-layout: fixed; width: 100%; border-collapse: separate; border-spacing: 0; text-align: left; font-size: 0.9em; border: 1px solid #eee; border-radius: 6px; overflow: hidden;">
                     <thead>
                         <tr style="">
-                            <th style="padding: 8px; border-bottom: 1px solid #ddd; white-space: nowrap; color: #555; width: 7%;">時間</th>
+                            <th style="padding: 8px; border-bottom: 1px solid #ddd; white-space: nowrap; color: #555; width: 8%;">時間</th>
                             ${DAY_MAP.slice(1, 6).map(day =>
-                                `<th style="padding: 8px; border-bottom: 1px solid #ddd; text-align:center; width: 18.6%; color: #555; ${day === currentDayName ? 'background-color: rgba(220, 53, 69, 0.08); color: #dc3545; font-weight:bold;' : ''}">${day}</th>`
+                                `<th style="padding: 8px; border-bottom: 1px solid #ddd; text-align:center; width: 18.4%; color: #555; ${day === currentDayName ? 'background-color: rgba(220, 53, 69, 0.08); color: #dc3545; font-weight:bold;' : ''}">${day}</th>`
                             ).join('')}
                         </tr>
                     </thead>
@@ -2194,9 +2202,10 @@ async function init() {
             const startM = (periodTime.start % 100).toString().padStart(2, '0');
             const endH = Math.floor(periodTime.end / 100);
             const endM = (periodTime.end % 100).toString().padStart(2, '0');
-            const timeStr = `${startH}:${startM}～${endH}:${endM}`;
             
-           htmlContent += `<tr><td style="padding: 8px; border-bottom: 1px solid #eee; font-size: 0.85em; color: #777; background-color: transparent; white-space: nowrap;">${period}<br><span style="font-size:0.8em; opacity:0.8;">(${timeStr})</span></td>`;
+            const timeStr = `<span style="display:inline-block; line-height:1.1;">${startH}:${startM}<br>｜<br>${endH}:${endM}</span>`;
+
+           htmlContent += `<tr><td style="padding: 4px; border-bottom: 1px solid #eee; font-size: 0.8em; color: #777; background-color: transparent; white-space: nowrap; text-align: center; vertical-align: middle;">${period}<br><span style="font-size:0.85em; opacity:0.8;">${timeStr}</span></td>`;
             for (let i = 1; i <= 5; i++) {
                 const dayName = DAY_MAP[i];
                 const course = timetable[dayName] ? timetable[dayName][period] : null;
