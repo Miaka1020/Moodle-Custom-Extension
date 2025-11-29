@@ -123,6 +123,9 @@ https://chromewebstore.google.com/detail/plihohicbpnimfimobapbjeebebabjja?utm_so
 * カスタム設定をクリックできないバグを修正
 ### v4.2
 * 時間割のuiを修正
+
+### v4.3
+・ダークモードのバクを修正
 ---
 
 ## 開発者
