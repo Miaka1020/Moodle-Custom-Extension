@@ -120,7 +120,12 @@ https://chromewebstore.google.com/detail/plihohicbpnimfimobapbjeebebabjja?utm_so
 * UIなど修正
 
 ### v4.1
-* カスタム設定をクリックできないバグを修正 
+* カスタム設定をクリックできないバグを修正
+### v4.2
+* 時間割のuiを修正
+
+### v4.3
+* ダークモードのバクを修正
 ---
 
 ## 開発者
