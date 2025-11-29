@@ -125,7 +125,7 @@ https://chromewebstore.google.com/detail/plihohicbpnimfimobapbjeebebabjja?utm_so
 * 時間割のuiを修正
 
 ### v4.3
-・ダークモードのバクを修正
+* ダークモードのバクを修正
 ---
 
 ## 開発者
