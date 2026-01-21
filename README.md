@@ -15,6 +15,17 @@
       <em>動画背景の設定デモ</em>
     </p>
 
+* **出席管理ウィジェット (New!)**
+    * 各コースのトップページに出席・遅刻・欠席を記録できるウィジェットを追加
+    * 単位取得に必要な出席率（2/3など）を分数で設定可能
+    * 「あと何回休めるか」を自動計算し、危険な場合は警告を表示
+    * 全ての操作履歴をタイムラインで確認・取り消し可能
+    <p align="center">
+      <img src="assets/screenshot-08.png" width="500">
+      <br>
+      <em>出席管理ウィジェットの表示例</em>
+    </p>
+
 * **ヘッダーのカスタマイズ**
     * ヘッダーの背景色、文字色のカスタマイズ
     <p align="center">
@@ -121,6 +132,7 @@ https://chromewebstore.google.com/detail/plihohicbpnimfimobapbjeebebabjja?utm_so
 
 ### v4.1
 * カスタム設定をクリックできないバグを修正
+
 ### v4.2
 * 時間割のuiを修正
 
@@ -129,6 +141,13 @@ https://chromewebstore.google.com/detail/plihohicbpnimfimobapbjeebebabjja?utm_so
 
 ### v4.4
 * 時間割のuiを修正
+
+### v5.0
+* **出席管理機能（Attendance Manager）を実装**
+* 操作履歴（ログ）の全保存・取り消し機能を追加
+* 単位認定不可（R）の自動判定表示を追加
+* 設定画面のUI改善（スクロール対応、分数指定）
+
 ---
 
 ## 開発者
