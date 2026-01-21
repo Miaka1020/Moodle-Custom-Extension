@@ -57,6 +57,14 @@
     const BODY_SELECTOR = 'body#page-my-index, body#page-course-view-topics, body#page-course-view-weeks,body#page';
     const DASHBOARD_REGION_SELECTOR = '#block-region-content';
 
+    // --- Attendance Feature Constants ---
+    const ATTENDANCE_STORAGE_KEY = 'moodle_custom_attendance_v1';
+    const DEFAULT_ATTENDANCE_CONFIG = {
+        totalClasses: 16,        // デフォルト授業回数
+        requiredRatio: 2 / 3,    // 必要出席率 (2/3)
+        latesPerAbsence: 2       // 遅刻何回で欠席1回扱いか
+    };
+
     // --- Global variables ---
     let db;
     let currentSettings = {};
@@ -340,6 +348,10 @@ async function init() {
         document.addEventListener('DOMContentLoaded', () => startUIInjection(settings));
     }
 
+    if (document.URL.includes('/course/view.php')) {
+            initAttendanceFeature();
+    }
+
     // Initial scan (wait for Moodle load)
     setTimeout(scanCoursesFromPage, 2000); 
     
@@ -405,6 +417,10 @@ async function init() {
         changeSiteTitle(); 
 
         bindFoucProtectionOnNavigation();
+
+        if (document.URL.includes('/course/view.php')) {
+            initAttendanceFeature();
+        }
 
     }
 
@@ -3424,5 +3440,422 @@ async function init() {
             document.addEventListener('DOMContentLoaded', () => {
             init();
     });
+
+   // X. Attendance Management Feature
+
+    async function getAttendanceData() {
+        const data = await chrome.storage.local.get(ATTENDANCE_STORAGE_KEY);
+        return data[ATTENDANCE_STORAGE_KEY] || {};
+    }
+
+    async function saveAttendanceData(data) {
+        await chrome.storage.local.set({ [ATTENDANCE_STORAGE_KEY]: data });
+    }
+
+    async function initAttendanceFeature() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const courseId = urlParams.get('id');
+        if (!courseId) return;
+
+        const allData = await getAttendanceData();
+        let courseData = allData[courseId] || {
+            attended: 0,
+            late: 0,
+            absent: 0,
+            logs: [], 
+            config: { ...DEFAULT_ATTENDANCE_CONFIG }
+        };
+        
+        if (typeof courseData.absent === 'undefined') courseData.absent = 0;
+        if (!courseData.logs) courseData.logs = [];
+
+        injectAttendanceWidget(courseId, courseData);
+    }
+
+    function calculateAttendanceStatus(data) {
+        const { attended, late, absent, config } = data;
+        const { totalClasses, requiredRatio, latesPerAbsence } = config;
+
+        const latePenaltyAbsences = Math.floor(late / latesPerAbsence);
+        const requiredAttendanceCount = Math.ceil(totalClasses * requiredRatio);
+        const maxAllowedAbsences = totalClasses - requiredAttendanceCount;
+        const currentEffectiveAbsences = absent + latePenaltyAbsences;
+        const remainingSafeAbsences = maxAllowedAbsences - currentEffectiveAbsences;
+        const currentTotal = attended + late + absent;
+
+        const isUnitFailed = remainingSafeAbsences < 0;
+        const isMaxReached = currentTotal >= totalClasses;
+
+        const today = new Date().toDateString();
+        let lastLog = null;
+        for (let i = data.logs.length - 1; i >= 0; i--) {
+            const log = data.logs[i];
+            if (!log.wasUndone && !log.type.startsWith('undo_')) {
+                lastLog = log;
+                break;
+            }
+        }
+        
+        const isActionDoneToday = lastLog && new Date(lastLog.timestamp).toDateString() === today;
+
+        return {
+            requiredAttendanceCount,
+            maxAllowedAbsences,
+            remainingSafeAbsences,
+            currentTotal,
+            isUnitFailed,
+            isMaxReached,
+            isActionDoneToday,
+            lastLog
+        };
+    }
+
+    function injectAttendanceWidget(courseId, courseData) {
+        const regionMain = document.getElementById('region-main');
+        if (!regionMain) return;
+
+        const widgetId = 'moodle-custom-attendance-widget';
+        if (document.getElementById(widgetId)) return;
+
+        const container = document.createElement('div');
+        container.id = widgetId;
+        container.className = 'card block custom-card-style mb-4';
+        container.style.cssText = `
+            border: none; 
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            overflow: hidden; 
+            transition: all 0.3s ease;
+            position: relative;
+        `;
+
+        regionMain.prepend(container);
+        renderAttendanceWidgetContent(container, courseId, courseData);
+    }
+
+    function formatLogDate(timestamp) {
+        const d = new Date(timestamp);
+        return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    }
+
+    function getFractionFromRatio(ratio) {
+        if (Math.abs(ratio - 2/3) < 0.01) return { num: 2, denom: 3 };
+        if (Math.abs(ratio - 3/4) < 0.01) return { num: 3, denom: 4 };
+        if (Math.abs(ratio - 1/2) < 0.01) return { num: 1, denom: 2 };
+        if (Math.abs(ratio - 4/5) < 0.01) return { num: 4, denom: 5 };
+        return { num: 2, denom: 3 };
+    }
+
+    function renderAttendanceWidgetContent(container, courseId, courseData) {
+        const status = calculateAttendanceStatus(courseData);
+        
+        // --- テーマカラー設定（青ベース） ---
+        // デフォルト（余裕あり）を青 (#007bff) に変更
+        let uiTheme = { color: '#007bff', bg: 'rgba(0, 123, 255, 0.1)', text: '余裕あり' };
+        
+        if (status.isUnitFailed) {
+            uiTheme = { color: '#6c757d', bg: 'rgba(108, 117, 125, 0.1)', text: '単位認定不可' };
+        } else if (status.remainingSafeAbsences <= 1) {
+            uiTheme = { color: '#dc3545', bg: 'rgba(220, 53, 69, 0.1)', text: '危険域' };
+        } else if (status.remainingSafeAbsences <= 2) {
+            uiTheme = { color: '#ffc107', bg: 'rgba(255, 193, 7, 0.1)', text: '注意' };
+        }
+
+        let todayStatusHtml = '';
+        if (status.isActionDoneToday) {
+            let typeText = '';
+            let iconClass = '';
+            if (status.lastLog.type === 'attend') { typeText = '出席済み'; iconClass = 'fa-check'; }
+            else if (status.lastLog.type === 'late') { typeText = '遅刻'; iconClass = 'fa-clock'; }
+            else if (status.lastLog.type === 'absent') { typeText = '欠席'; iconClass = 'fa-times'; }
+
+            const timeStr = formatLogDate(status.lastLog.timestamp).split(' ')[1];
+            todayStatusHtml = `
+                <div style="background: ${uiTheme.bg}; color: ${uiTheme.color}; padding: 6px 12px; border-radius: 20px; font-weight: bold; font-size: 0.85em; display: inline-flex; align-items: center; gap: 5px;">
+                    <i class="fa ${iconClass}"></i> 今日は${timeStr}に${typeText}
+                </div>
+            `;
+        } else if (status.isUnitFailed) {
+             todayStatusHtml = `
+                <div style="background: #333; color: #fff; padding: 6px 12px; border-radius: 20px; font-weight: bold; font-size: 0.85em;">
+                    R (単位不可)
+                </div>
+            `;
+        } else {
+            todayStatusHtml = `
+                <div style="background: #eee; color: #666; padding: 6px 12px; border-radius: 20px; font-weight: bold; font-size: 0.85em; display: inline-flex; align-items: center; gap: 5px;">
+                    <i class="fa fa-minus"></i> 今日の記録なし
+                </div>
+            `;
+        }
+
+        const logsHtml = courseData.logs.slice().reverse().map(log => {
+            let icon = '';
+            let text = '';
+            let rowStyle = 'display: flex; justify-content: space-between; padding: 8px 5px; border-bottom: 1px solid rgba(0,0,0,0.05); font-size: 0.85em; color: #555;';
+            
+            // 出席アイコンを青（primary）に変更
+            if (log.type === 'attend') { icon = 'fa-check text-primary'; text = '出席'; }
+            else if (log.type === 'late') { icon = 'fa-clock text-warning'; text = '遅刻'; }
+            else if (log.type === 'absent') { icon = 'fa-times text-danger'; text = '欠席'; }
+            else if (log.type === 'undo_attend') { icon = 'fa-rotate-left text-muted'; text = '取消 (出席)'; }
+            else if (log.type === 'undo_late') { icon = 'fa-rotate-left text-muted'; text = '取消 (遅刻)'; }
+            else if (log.type === 'undo_absent') { icon = 'fa-rotate-left text-muted'; text = '取消 (欠席)'; }
+
+            if (log.wasUndone) {
+                rowStyle += ' text-decoration: line-through; opacity: 0.5; background-color: rgba(0,0,0,0.02);';
+            }
+
+            return `
+                <div style="${rowStyle}">
+                    <span style="font-weight:600;"><i class="fa ${icon}"></i> ${text}</span>
+                    <span style="font-family: monospace; color:#888;">${formatLogDate(log.timestamp)}</span>
+                </div>
+            `;
+        }).join('') || '<div style="text-align:center; color:#999; font-size:0.8em; padding:10px;">履歴なし</div>';
+
+        const frac = getFractionFromRatio(courseData.config.requiredRatio);
+
+        let remainingDisplay = status.remainingSafeAbsences;
+        let remainingLabel = "(遅刻換算込み)";
+        if (status.isUnitFailed) {
+            remainingDisplay = "R";
+            remainingLabel = "欠席超過";
+        }
+
+        const disableButtons = status.isMaxReached ? 'disabled style="opacity:0.5; cursor:not-allowed;' : 'style="';
+
+        // 出席ボタンのスタイルを青グラデーションに変更
+        const html = `
+            <div class="card-body" style="padding: 1.25rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <h5 style="margin: 0; font-weight: 700; color: #333; font-size: 1.1rem;">出席管理</h5>
+                        ${todayStatusHtml}
+                    </div>
+                    <button id="att-settings-btn" style="background: transparent; border: none; color: #999; cursor: pointer; padding: 5px;">
+                        <i class="fa fa-cog fa-lg"></i>
+                    </button>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1.3fr; gap: 8px; margin-bottom: 20px;">
+                    <div style="text-align: center; background: #f8f9fa; padding: 10px 5px; border-radius: 8px;">
+                        <div style="font-size: 0.7rem; color: #666; margin-bottom: 2px;">出席</div>
+                        <div style="font-size: 1.6rem; font-weight: 800; color: #333; line-height: 1.1;">${courseData.attended}</div>
+                    </div>
+                    <div style="text-align: center; background: #f8f9fa; padding: 10px 5px; border-radius: 8px;">
+                        <div style="font-size: 0.7rem; color: #666; margin-bottom: 2px;">遅刻</div>
+                        <div style="font-size: 1.6rem; font-weight: 800; color: #fd7e14; line-height: 1.1;">${courseData.late}</div>
+                    </div>
+                    <div style="text-align: center; background: #fff5f5; padding: 10px 5px; border-radius: 8px;">
+                        <div style="font-size: 0.7rem; color: #666; margin-bottom: 2px;">欠席</div>
+                        <div style="font-size: 1.6rem; font-weight: 800; color: #dc3545; line-height: 1.1;">${courseData.absent}</div>
+                    </div>
+                    <div style="text-align: center; background: ${uiTheme.bg}; padding: 10px 5px; border-radius: 8px; border: 1px solid ${uiTheme.color};">
+                        <div style="font-size: 0.7rem; color: ${uiTheme.color}; font-weight: bold; margin-bottom: 2px; white-space: nowrap;">あと休める</div>
+                        <div style="font-size: 1.6rem; font-weight: 800; color: ${uiTheme.color}; line-height: 1.1;">${remainingDisplay}</div>
+                        <div style="font-size: 0.65rem; color: ${uiTheme.color}; opacity: 0.8;">${remainingLabel}</div>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                   <div style="display:flex; justify-content:space-between; font-size:0.75em; color:#666; margin-bottom:3px;">
+                       <span>現在の消化: ${status.currentTotal}回</span>
+                       <span>全${courseData.config.totalClasses}回</span>
+                   </div>
+                   <div style="background:#e9ecef; height:6px; border-radius:3px; overflow:hidden;">
+                       <div style="background:#007bff; width:${Math.min(100, (status.currentTotal / courseData.config.totalClasses)*100)}%; height:100%;"></div>
+                   </div>
+                </div>
+
+                <div style="display: flex; gap: 8px; margin-bottom: 15px;">
+                    <button id="btn-add-attend" class="modern-btn" ${disableButtons} flex: 2; background: linear-gradient(135deg, #007bff 0%, #0056b3 100%); color: white; border: none; padding: 10px; border-radius: 8px; font-weight: bold; box-shadow: 0 2px 5px rgba(0, 123, 255, 0.3);">
+                        <i class="fa fa-check"></i> 出席
+                    </button>
+                    <button id="btn-add-late" class="modern-btn" ${disableButtons} flex: 1.5; background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 10px; border-radius: 8px; font-weight: bold;">
+                        <i class="fa fa-clock"></i> 遅刻
+                    </button>
+                    <button id="btn-add-absent" class="modern-btn" ${disableButtons} flex: 1.5; background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px; border-radius: 8px; font-weight: bold;">
+                        <i class="fa fa-times"></i> 欠席
+                    </button>
+                     <button id="btn-undo-att" class="modern-btn" style="flex: 0 0 40px; background: #f1f3f5; color: #495057; border: 1px solid #dee2e6; border-radius: 8px;" title="Undo">
+                        <i class="fa fa-rotate-left"></i>
+                    </button>
+                </div>
+
+                <div style="border-top: 1px solid #eee; padding-top: 10px;">
+                    <div id="att-history-toggle" style="cursor: pointer; font-size: 0.8rem; color: #007bff; display: flex; align-items: center; gap: 5px; user-select: none;">
+                        <i class="fa fa-history"></i> 操作履歴 (${courseData.logs.length}件) <i class="fa fa-chevron-down" style="font-size: 0.7em; margin-left: auto;"></i>
+                    </div>
+                    <div id="att-history-list" style="display: none; margin-top: 10px; background: #fafafa; padding: 5px 10px; border-radius: 8px; max-height: 150px; overflow-y: auto;">
+                        ${logsHtml}
+                    </div>
+                </div>
+            </div>
+
+            <div id="att-settings-panel" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.98); z-index: 10; padding: 20px; border-radius: 12px; overflow-y: auto;">
+                <h6 style="border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; font-weight: bold;">設定</h6>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">授業の全回数</label>
+                    <input type="number" id="att-cfg-total" value="${courseData.config.totalClasses}" class="modern-input" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">必要出席率 (分数)</label>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <input type="number" id="att-cfg-num" value="${frac.num}" class="modern-input" style="width: 60px; padding: 8px; border-radius: 6px; border: 1px solid #ddd; text-align: center;">
+                        <span style="font-weight: bold; color: #555; font-size: 1.2em;">/</span>
+                        <input type="number" id="att-cfg-denom" value="${frac.denom}" class="modern-input" style="width: 60px; padding: 8px; border-radius: 6px; border: 1px solid #ddd; text-align: center;">
+                    </div>
+                    <div style="font-size: 0.75em; color: #999; margin-top: 4px;">※一般的な規定: 2/3</div>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">遅刻ペナルティ</label>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <input type="number" id="att-cfg-late" value="${courseData.config.latesPerAbsence}" class="modern-input" style="width: 60px; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                        <span style="font-size: 0.85em;">回で欠席1回分</span>
+                    </div>
+                </div>
+                
+                <div style="display: flex; gap: 10px; margin-bottom: 25px;">
+                    <button id="att-cancel-cfg" class="modern-btn secondary-btn" style="flex: 1; padding: 8px;">キャンセル</button>
+                    <button id="att-save-cfg" class="modern-btn primary-btn" style="flex: 1; padding: 8px;">保存</button>
+                </div>
+
+                <div style="border-top: 1px solid #eee; padding-top: 15px; text-align: center;">
+                    <button id="att-reset-data" class="modern-btn" style="background: #fff; color: #dc3545; border: 1px solid #dc3545; padding: 8px 15px; font-size: 0.85em; width: 100%;">
+                        <i class="fa fa-trash"></i> データをリセット (全消去)
+                    </button>
+                </div>
+
+                <div style="height: 20px;"></div>
+            </div>
+        `;
+        container.innerHTML = html;
+
+        // イベントリスナー
+        const btnAttend = container.querySelector('#btn-add-attend');
+        const btnLate = container.querySelector('#btn-add-late');
+        const btnAbsent = container.querySelector('#btn-add-absent');
+
+        if (btnAttend) {
+            btnAttend.addEventListener('click', async () => {
+                if (status.isMaxReached) return;
+                courseData.attended++;
+                courseData.logs.push({ type: 'attend', timestamp: Date.now(), wasUndone: false });
+                await updateAndSave(courseId, courseData, container);
+            });
+        }
+
+        if (btnLate) {
+            btnLate.addEventListener('click', async () => {
+                if (status.isMaxReached) return;
+                courseData.late++;
+                courseData.logs.push({ type: 'late', timestamp: Date.now(), wasUndone: false });
+                await updateAndSave(courseId, courseData, container);
+            });
+        }
+
+        if (btnAbsent) {
+            btnAbsent.addEventListener('click', async () => {
+                if (status.isMaxReached) return;
+                courseData.absent++;
+                courseData.logs.push({ type: 'absent', timestamp: Date.now(), wasUndone: false });
+                await updateAndSave(courseId, courseData, container);
+            });
+        }
+
+        container.querySelector('#btn-undo-att').addEventListener('click', async () => {
+            if (courseData.logs.length === 0) return;
+
+            let targetLogIndex = -1;
+            for (let i = courseData.logs.length - 1; i >= 0; i--) {
+                const log = courseData.logs[i];
+                if (!log.wasUndone && ['attend', 'late', 'absent'].includes(log.type)) {
+                    targetLogIndex = i;
+                    break;
+                }
+            }
+
+            if (targetLogIndex === -1) return;
+
+            const targetLog = courseData.logs[targetLogIndex];
+            
+            if (targetLog.type === 'attend') {
+                courseData.attended = Math.max(0, courseData.attended - 1);
+            } else if (targetLog.type === 'late') {
+                courseData.late = Math.max(0, courseData.late - 1);
+            } else if (targetLog.type === 'absent') {
+                courseData.absent = Math.max(0, courseData.absent - 1);
+            }
+            
+            courseData.logs[targetLogIndex].wasUndone = true;
+
+            courseData.logs.push({ 
+                type: 'undo_' + targetLog.type, 
+                timestamp: Date.now(),
+                wasUndone: false 
+            });
+
+            await updateAndSave(courseId, courseData, container);
+        });
+
+        const historyList = container.querySelector('#att-history-list');
+        const historyToggle = container.querySelector('#att-history-toggle');
+        historyToggle.addEventListener('click', () => {
+            const isHidden = historyList.style.display === 'none';
+            historyList.style.display = isHidden ? 'block' : 'none';
+            historyToggle.querySelector('.fa-chevron-down').style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+        });
+
+        const settingsPanel = container.querySelector('#att-settings-panel');
+        container.querySelector('#att-settings-btn').addEventListener('click', () => {
+            settingsPanel.style.display = 'block';
+        });
+        container.querySelector('#att-cancel-cfg').addEventListener('click', () => {
+            settingsPanel.style.display = 'none';
+        });
+
+        container.querySelector('#att-save-cfg').addEventListener('click', async () => {
+            const newTotal = parseInt(container.querySelector('#att-cfg-total').value);
+            const num = parseInt(container.querySelector('#att-cfg-num').value);
+            const denom = parseInt(container.querySelector('#att-cfg-denom').value);
+            const newLateLimit = parseInt(container.querySelector('#att-cfg-late').value);
+
+            if (newTotal > 0 && newLateLimit > 0 && num > 0 && denom > 0) {
+                courseData.config.totalClasses = newTotal;
+                courseData.config.requiredRatio = num / denom;
+                courseData.config.latesPerAbsence = newLateLimit;
+                
+                await updateAndSave(courseId, courseData, container);
+            } else {
+                alert('正しい値を入力してください');
+            }
+        });
+
+        // データリセットボタンの処理
+        container.querySelector('#att-reset-data').addEventListener('click', async () => {
+            if (confirm('本当にこのコースの出席データと履歴をすべて消去して初期化しますか？\n（この操作は取り消せません）')) {
+                courseData.attended = 0;
+                courseData.late = 0;
+                courseData.absent = 0;
+                courseData.logs = [];
+                await updateAndSave(courseId, courseData, container);
+                alert('データをリセットしました。');
+                settingsPanel.style.display = 'none';
+            }
+        });
+        
+        applyContentOpacityStyle(currentSettings.contentOpacity);
+    }
+
+    async function updateAndSave(courseId, courseData, container) {
+        const allData = await getAttendanceData();
+        allData[courseId] = courseData;
+        await saveAttendanceData(allData);
+        renderAttendanceWidgetContent(container, courseId, courseData);
+    }
 
 })();
