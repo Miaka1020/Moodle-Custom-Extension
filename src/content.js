@@ -1,11 +1,14 @@
 (function() {
     'use strict';
 
+    if (window.moodleCustomizerInitialized) return;
+    window.moodleCustomizerInitialized = true;
+
     // I. Constants and Global Variables
     
     // IndexedDB
     const DB_NAME = 'MoodleCustomBGDB';
-    const DB_VERSION = 2;
+    const DB_VERSION = 4;
     const STORE_NAME = 'background_files';
     const DB_KEY_BG = 'current_bg';
 
@@ -60,9 +63,9 @@
     // --- Attendance Feature Constants ---
     const ATTENDANCE_STORAGE_KEY = 'moodle_custom_attendance_v1';
     const DEFAULT_ATTENDANCE_CONFIG = {
-        totalClasses: 16,        // デフォルト授業回数
-        requiredRatio: 2 / 3,    // 必要出席率 (2/3)
-        latesPerAbsence: 2       // 遅刻何回で欠席1回扱いか
+        totalClasses: 16,       
+        requiredRatio: 2 / 3,    
+        latesPerAbsence: 2       
     };
 
     // --- Global variables ---
@@ -334,6 +337,7 @@ async function init() {
          }, 2000); // Execute after 2 seconds
     }
     
+    
     if (!localStorage.getItem(FONT_CACHE_KEY)) {
         saveFontCache(settings);
     }
@@ -361,6 +365,9 @@ async function init() {
         console.log(availableCourses);
         console.log("------------------------------------------");
     };
+
+    initReferenceSidebar(); 
+
     // ----------------------
 }
    function changeSiteTitle() {
@@ -672,10 +679,14 @@ async function init() {
             }
             const request = indexedDB.open(DB_NAME, DB_VERSION);
             request.onupgradeneeded = (event) => {
-                db = event.target.result;
-                if (!db.objectStoreNames.contains(STORE_NAME)) {
-                    db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-                }
+            db = event.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+            }
+
+            if (!db.objectStoreNames.contains('reference_files')) {
+                db.createObjectStore('reference_files', { keyPath: 'id' });
+    }
             };
             request.onsuccess = (event) => {
                 db = event.target.result;
@@ -798,49 +809,34 @@ async function init() {
         } catch (e) { console.warn("Failed to update font cache", e); }
     }
 
-  async function saveSettings(settings) {
-        if (currentBG_BlobUrl && currentBG_BlobUrl !== settings.backgroundUrl) {
-            URL.revokeObjectURL(currentBG_BlobUrl);
-            currentBG_BlobUrl = null;
-        }
-
-        saveFontCache(settings);
-        
-        // Separate Dark Mode settings
-        const { darkModeMode, darkModeBrightness, darkModeContrast, darkModeGrayscale, darkModeSepia, ...restSettings } = settings;
-
-        // Prepare to save normal settings
-        let settingsToSave = { ...restSettings };
-        
-        // Fix: Prevent overwriting backgroundType
-        const originalBackgroundUrl = settingsToSave.backgroundUrl;
-        const originalBackgroundType = settingsToSave.backgroundType; // Holds value 'image' or 'video'
-
-        if (originalBackgroundUrl.startsWith('blob:') || originalBackgroundUrl === 'indexeddb') {
-            // If local file (via IndexedDB)
-            settingsToSave.backgroundUrl = 'indexeddb';
-            settingsToSave.backgroundType = originalBackgroundType; // [Keep]
-        } else if (originalBackgroundUrl.startsWith('http')) {
-            // If external URL specified directly (not in UI but for future)
-            settingsToSave.backgroundUrl = originalBackgroundUrl;
-            settingsToSave.backgroundType = originalBackgroundType; // [Keep]
-        } else {
-            // Otherwise (no direct URL or 'none')
-            settingsToSave.backgroundUrl = '';
-            settingsToSave.backgroundType = 'none';
-        }
-        
-        // Save Dark Mode settings
-        const darkmodeSettingsToSave = { darkModeMode, darkModeBrightness, darkModeContrast, darkModeGrayscale, darkModeSepia };
-            
-        // Fix: Save darkModeMode directly to local storage for fast check
-        localStorage.setItem(DARKMODE_ENABLED_KEY, darkModeMode); 
-
-        await chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: JSON.stringify(settingsToSave) });
-        await chrome.storage.local.set({ [DARKMODE_SETTINGS_KEY]: JSON.stringify(darkmodeSettingsToSave) });
-
-        currentSettings = settings;
+ async function saveSettings(settings) {
+    if (currentBG_BlobUrl && currentBG_BlobUrl !== settings.backgroundUrl) {
+        URL.revokeObjectURL(currentBG_BlobUrl);
+        currentBG_BlobUrl = null;
     }
+
+    saveFontCache(settings);
+    
+    const { darkModeMode, darkModeBrightness, darkModeContrast, darkModeGrayscale, darkModeSepia, ...restSettings } = settings;
+    let settingsToSave = { ...restSettings };
+    
+    if (settings.backgroundUrl === 'indexeddb' || (settings.backgroundUrl && settings.backgroundUrl.startsWith('blob:'))) {
+        settingsToSave.backgroundUrl = 'indexeddb';
+        settingsToSave.backgroundType = (settings.backgroundType && settings.backgroundType !== 'none') ? settings.backgroundType : 'image';
+    } else if (settings.backgroundUrl && settings.backgroundUrl.startsWith('http')) {
+        settingsToSave.backgroundUrl = settings.backgroundUrl;
+    } else {
+        settingsToSave.backgroundUrl = '';
+        settingsToSave.backgroundType = 'none';
+    }
+    
+    localStorage.setItem(DARKMODE_ENABLED_KEY, darkModeMode); 
+
+    await chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: JSON.stringify(settingsToSave) });
+    await chrome.storage.local.set({ [DARKMODE_SETTINGS_KEY]: JSON.stringify({ darkModeMode, darkModeBrightness, darkModeContrast, darkModeGrayscale, darkModeSepia }) });
+
+    currentSettings = settings;
+}
 
     // V. UI Insertion and Events
      
@@ -1091,7 +1087,6 @@ async function init() {
                 justify-content: center; align-items: center; 
                 animation: fadeIn 0.2s ease;
                 
-                /* 【修正点】イベント透過防止とスクロール連鎖防止 */
                 pointer-events: auto !important;
                 overscroll-behavior: contain;
             }
@@ -1104,10 +1099,8 @@ async function init() {
                 display: flex; flex-direction: column; font-family: 'Segoe UI', sans-serif; 
                 overflow: hidden; 
                 
-                /* 【修正点】コンテンツ自体のイベントを確実に有効化 */
                 pointer-events: auto !important;
             }
-            /* ... (以下、元のCSSと同じため省略なしで記述する場合は元のコードを使用) ... */
             .modern-modal-header { 
                 padding: 15px 25px; 
                 background: #f8f9fa; 
@@ -1516,35 +1509,35 @@ async function init() {
 }
 
     async function handleFileSelection(file, type) {
-        if (currentBG_BlobUrl) {
-           URL.revokeObjectURL(currentBG_BlobUrl);
-           currentBG_BlobUrl = null;
-        }
-        
-        try {
-             await saveFileToDB(file, file.type);
-             
-             const blobUrl = URL.createObjectURL(file);
-             currentBG_BlobUrl = blobUrl;
-
-             currentSettings.backgroundUrl = blobUrl;
-             currentSettings.backgroundType = type;
-             
-             applyBackgroundPreview();
-             
-             const modal = document.getElementById('custom-settings-modal');
-             if (modal && modal.style.display === 'flex') {
-                 document.getElementById('currentBackgroundInfo').innerHTML = `<b>現在の背景</b>: ローカルファイル (IndexedDB経由・永続化済み)`;
-                 document.getElementById('bg-type-video').checked = (type === 'video');
-                 document.getElementById('bg-type-image').checked = (type === 'image');
-             }
-             alert(`背景ファイル ${file.name} をプレビュー適用しました。\n「保存」ボタンを押して永続化してください。`);
-             
-         } catch (e) {
-             console.error("IndexedDB Save Error:", e);
-             alert('エラー: ファイルの保存中に問題が発生しました。');
-         }
+    if (currentBG_BlobUrl) {
+       URL.revokeObjectURL(currentBG_BlobUrl);
+       currentBG_BlobUrl = null;
     }
+    
+    try {
+         await saveFileToDB(file, file.type);
+         
+         const blobUrl = URL.createObjectURL(file);
+         currentBG_BlobUrl = blobUrl;
+
+         currentSettings.backgroundUrl = blobUrl;
+         currentSettings.backgroundType = type;
+         
+         applyBackgroundPreview();
+        
+         const modal = document.getElementById('custom-settings-modal');
+         if (modal && modal.style.display === 'flex') {
+             const info = document.getElementById('currentBackgroundInfo');
+             if(info) info.innerHTML = `<b>準備OK</b>: ${file.name} (保存ボタンを押して確定してください)`;
+             
+             document.getElementById('bg-type-video').checked = (type === 'video');
+             document.getElementById('bg-type-image').checked = (type === 'image');
+         }
+         
+     } catch (e) {
+         console.error("IndexedDB Save Error:", e);
+     }
+}
 
 
     // VI. Dynamic Style Application
@@ -1569,7 +1562,6 @@ async function init() {
 
         document.body.style.setProperty('visibility', 'visible', 'important');
 
-        // Dark Reader適用完了後、ローディング画面を削除
         removeCustomLoadingScreen();
     }
     
@@ -3437,9 +3429,281 @@ async function init() {
             }
 
 
-            document.addEventListener('DOMContentLoaded', () => {
+
+        async function updateAndSave(courseId, courseData, container) {
+            const allData = await getAttendanceData();
+            allData[courseId] = courseData;
+            await saveAttendanceData(allData);
+            renderAttendanceWidgetContent(container, courseId, courseData);
+        }
+
+        // --- Feature: Reference Sidebar (Persistence: State, File, and Width) ---
+    function initReferenceSidebar() {
+        const REF_STORE_NAME = 'reference_files';
+        const REF_KEY = 'last_ref_file';
+        const SIDEBAR_STATE_KEY = 'moodle_sidebar_open_state'; 
+        const SIDEBAR_WIDTH_KEY = 'moodle_sidebar_width'; 
+
+        const cleanupIds = [
+            'moodle-ref-sidebar-container', 
+            'ref-toggle-btn', 
+            'ref-resize-overlay',
+            'ref-sidebar-styles-v7-ultimate'
+        ];
+        cleanupIds.forEach(id => document.getElementById(id)?.remove());
+
+        const style = document.createElement('style');
+        style.id = 'ref-sidebar-styles-v7-ultimate';
+        style.innerHTML = `
+            #moodle-ref-sidebar-container {
+                position: fixed !important;
+                top: 0 !important;
+                right: -100%;
+                width: 525px;
+                min-width: 250px;
+                max-width: 95vw;
+                height: 100vh !important;
+                background-color: #ffffff !important;
+                box-shadow: -5px 0 30px rgba(0,0,0,0.2) !important;
+                z-index: 2147483646 !important; 
+                display: flex !important;
+                flex-direction: column !important;
+                transition: right 0.3s ease !important; 
+                pointer-events: auto !important;
+            }
+            #moodle-ref-sidebar-container.open {
+                right: 0 !important;
+            }
+            #ref-resize-handle {
+                position: absolute !important;
+                top: 0 !important;
+                bottom: 0 !important;
+                left: -8px !important;
+                width: 16px !important;
+                cursor: col-resize !important;
+                z-index: 2147483647 !important;
+                background: transparent !important;
+                touch-action: none !important;
+            }
+            #ref-resize-visual {
+                position: absolute !important;
+                top: 0 !important;
+                bottom: 0 !important;
+                left: 0 !important;
+                width: 0px !important;
+                background: #007bff !important;
+                z-index: 2147483647 !important;
+                pointer-events: none !important;
+                transition: width 0.1s ease, box-shadow 0.1s ease !important;
+            }
+            #ref-resize-handle:hover + #ref-resize-visual,
+            #moodle-ref-sidebar-container.resizing #ref-resize-visual {
+                width: 4px !important;
+                box-shadow: -1px 0 8px rgba(0, 123, 255, 0.6) !important;
+            }
+            .ref-sidebar-header {
+                padding: 12px 15px !important;
+                background: #f8f9fa !important;
+                border-bottom: 1px solid #ddd !important;
+                display: flex !important;
+                justify-content: space-between !important;
+                align-items: center !important;
+                height: 50px !important;
+                flex-shrink: 0 !important;
+            }
+            .ref-sidebar-content {
+                flex-grow: 1 !important;
+                background: white !important;
+                position: relative !important;
+                overflow: hidden !important;
+            }
+            #ref-viewer-iframe {
+                width: 100% !important;
+                height: 100% !important;
+                border: none !important;
+                display: none;
+            }
+            #ref-resize-overlay {
+                position: fixed !important;
+                top: 0 !important; left: 0 !important; 
+                width: 100vw !important; height: 100vh !important;
+                z-index: 2147483647 !important; 
+                cursor: col-resize !important;
+                display: none;
+                background: transparent !important;
+            }
+            .ref-floating-btn {
+                position: fixed !important;
+                bottom: 20px !important;
+                right: 20px !important;
+                width: 50px !important;
+                height: 50px !important;
+                border-radius: 50% !important;
+                background: #ffffff !important;
+                color: #007bff !important;
+                border: 1px solid #ddd !important;
+                cursor: pointer !important;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.15) !important;
+                z-index: 2147483640 !important;
+                display: flex !important;
+                justify-content: center !important;
+                align-items: center !important;
+                font-size: 20px !important;
+                transition: transform 0.2s !important;
+            }
+            html[data-darkreader-scheme="dark"] #moodle-ref-sidebar-container { background-color: #1c1c1c !important; }
+            html[data-darkreader-scheme="dark"] .ref-sidebar-header { background-color: #252525 !important; border-color: #444 !important; }
+        `;
+        document.head.appendChild(style);
+
+        const container = document.createElement('div');
+        container.id = 'moodle-ref-sidebar-container';
+        container.innerHTML = `
+            <div id="ref-resize-handle"></div>
+            <div id="ref-resize-visual"></div>
+            <div class="ref-sidebar-header">
+                <span style="font-weight: bold; color: #333; font-size:14px;"><i class="fa fa-book"></i> 資料参照</span>
+                <div style="display:flex; gap:5px;">
+                    <input type="file" id="ref-file-input" accept=".pdf,.txt" style="display:none;">
+                    <button id="ref-load-btn" class="btn btn-primary btn-sm" style="padding: 2px 8px; font-size: 12px;">開く</button>
+                    <button id="ref-close-sidebar" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 12px;">閉じる</button>
+                </div>
+            </div>
+            <div class="ref-sidebar-content">
+                <iframe id="ref-viewer-iframe"></iframe>
+                <div id="ref-placeholder" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #adb5bd; width: 80%;">
+                    <i class="fa fa-file-pdf-o" style="font-size: 40px; opacity: 0.3; margin-bottom: 10px;"></i>
+                    <p style="font-size: 12px;">PDF/TXTを選択してください</p>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(container);
+
+        const toggleBtn = document.createElement('div');
+        toggleBtn.className = 'ref-floating-btn';
+        toggleBtn.id = 'ref-toggle-btn';
+        toggleBtn.innerHTML = '<i class="fa fa-book"></i>';
+        document.body.appendChild(toggleBtn);
+
+        const overlay = document.getElementById('ref-resize-overlay') || document.createElement('div');
+        overlay.id = 'ref-resize-overlay';
+        if (!overlay.parentElement) document.body.appendChild(overlay);
+
+        const sidebar = document.getElementById('moodle-ref-sidebar-container');
+        const iframe = document.getElementById('ref-viewer-iframe');
+        const fileInput = document.getElementById('ref-file-input');
+        const resizeHandle = document.getElementById('ref-resize-handle');
+
+        const openSidebar = () => {
+            sidebar.classList.add('open');
+            toggleBtn.style.display = 'none';
+            localStorage.setItem(SIDEBAR_STATE_KEY, 'open');
+        };
+
+        const closeSidebar = () => {
+            sidebar.classList.remove('open');
+            setTimeout(() => { if (!sidebar.classList.contains('open')) toggleBtn.style.display = 'flex'; }, 350);
+            localStorage.setItem(SIDEBAR_STATE_KEY, 'closed');
+        };
+
+        const restoreSidebar = async () => {
+
+            const savedWidth = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+            if (savedWidth) {
+                sidebar.style.setProperty('width', `${savedWidth}px`, 'important');
+            }
+          
+            if (db) {
+                try {
+                    const storeName = db.objectStoreNames.contains('reference_files') ? 'reference_files' : STORE_NAME;
+                    const transaction = db.transaction([storeName], 'readonly');
+                    const request = transaction.objectStore(storeName).get(REF_KEY);
+                    request.onsuccess = (e) => {
+                        const data = e.target.result;
+                        if (data && data.blob) {
+                            iframe.src = URL.createObjectURL(data.blob);
+                            iframe.style.display = 'block';
+                            document.getElementById('ref-placeholder').style.display = 'none';
+                        }
+                    };
+                } catch (err) { console.warn(err); }
+            }
+
+            const savedState = localStorage.getItem(SIDEBAR_STATE_KEY);
+            if (savedState === 'open') {
+                sidebar.style.transition = 'none';
+                openSidebar();
+                setTimeout(() => { sidebar.style.transition = ''; }, 50);
+            }
+        };
+
+        if (db) restoreSidebar();
+
+        toggleBtn.addEventListener('click', openSidebar);
+        document.getElementById('ref-close-sidebar').addEventListener('click', closeSidebar);
+        document.getElementById('ref-load-btn').addEventListener('click', () => fileInput.click());
+
+      fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (db) {
+        // 【修正】STORE_NAMEを使わず、必ず 'reference_files' を指定
+        const targetStore = 'reference_files';
+        if (db.objectStoreNames.contains(targetStore)) {
+            const transaction = db.transaction([targetStore], 'readwrite');
+            transaction.objectStore(targetStore).put({ id: REF_KEY, blob: file, type: file.type });
+        }
+    }
+
+            iframe.src = URL.createObjectURL(file);
+            iframe.style.display = 'block';
+            document.getElementById('ref-placeholder').style.display = 'none';
+        });
+
+        resizeHandle.addEventListener('pointerdown', (startEvent) => {
+            startEvent.preventDefault();
+            sidebar.classList.add('resizing');
+            overlay.style.display = 'block';
+            sidebar.style.setProperty('transition', 'none', 'important');
+            try { resizeHandle.setPointerCapture(startEvent.pointerId); } catch (err) {}
+
+            const onPointerMove = (moveEvent) => {
+                let newWidth = window.innerWidth - moveEvent.clientX;
+                newWidth = Math.max(250, Math.min(window.innerWidth * 0.95, newWidth));
+                sidebar.style.setProperty('width', `${newWidth}px`, 'important');
+            };
+
+            const onPointerUp = () => {
+                sidebar.classList.remove('resizing');
+                overlay.style.display = 'none';
+                sidebar.style.removeProperty('transition');
+                
+                const currentWidth = parseInt(sidebar.style.width);
+                if (currentWidth) {
+                    localStorage.setItem(SIDEBAR_WIDTH_KEY, currentWidth);
+                }
+
+                window.removeEventListener('pointermove', onPointerMove);
+                window.removeEventListener('pointerup', onPointerUp);
+            };
+
+            window.addEventListener('pointermove', onPointerMove);
+            window.addEventListener('pointerup', onPointerUp);
+        });
+
+    
+
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
             init();
-    });
+        }
+
+    
+    
 
    // X. Attendance Management Feature
 
@@ -3851,11 +4115,5 @@ async function init() {
         applyContentOpacityStyle(currentSettings.contentOpacity);
     }
 
-    async function updateAndSave(courseId, courseData, container) {
-        const allData = await getAttendanceData();
-        allData[courseId] = courseData;
-        await saveAttendanceData(allData);
-        renderAttendanceWidgetContent(container, courseId, courseData);
-    }
 
 })();
