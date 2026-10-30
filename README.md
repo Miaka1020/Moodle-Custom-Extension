@@ -168,7 +168,7 @@ https://chromewebstore.google.com/detail/plihohicbpnimfimobapbjeebebabjja?utm_so
 
 ## 開発者
 
-* maiaka
+* miaka
 
 ---
 
