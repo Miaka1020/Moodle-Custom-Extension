@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="340" viewBox="0 0 1440 340" role="img" aria-labelledby="title desc">
+  <title id="title">Custom-POLITE</title>
+  <desc id="desc">POLITEを、自分の使いやすい画面に。Chrome拡張機能 ver6.0 / Miaka1020</desc>
+  <rect width="1440" height="340" fill="#fafaf8"/>
+  <g font-family="Segoe UI,Meiryo,sans-serif">
+    <text x="56" y="54" font-size="16" fill="#535b64">POLITEのためのChrome拡張機能</text>
+    <text x="1384" y="54" text-anchor="end" font-size="16" fill="#535b64">非公式 / PC向け</text>
+    <path d="M56 79H1384" stroke="#d3d7da"/>
+    <text x="51" y="185" font-size="84" font-weight="700" letter-spacing="-3" fill="#1b242c">Custom-POLITE</text>
+    <text x="56" y="238" font-size="25" fill="#343d46">POLITEを、自分の使いやすい画面に。</text>
+    <path d="M56 280H1384" stroke="#d3d7da"/>
+    <path d="M56 280H166" stroke="#2875b7" stroke-width="3"/>
+    <text x="56" y="314" font-size="15" fill="#535b64">時間割 / 締切 / 資料参照 / 画面のカスタマイズ</text>
+    <text x="1384" y="314" text-anchor="end" font-size="15" fill="#535b64">ver6.0 — Miaka1020</text>
+  </g>
+</svg>
