@@ -28,14 +28,7 @@ body.dark-mode-fouc-temp #page-header {
     background-color: #252525 !important;
 }
 
-html.dark-fouc-mask::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    background: #000 !important;
-    z-index: 2147483647 !important;
-    pointer-events: none;
-}
+/* Dark mode styles the page directly; never cover it with a startup mask. */
 
 #moodle-custom-loading-screen {
     position: fixed;
@@ -98,7 +91,7 @@ html.dark-fouc-mask::before {
 #page,
 #page-wrapper {
     background-color: transparent !important;
-    z-index: 1;
+    z-index: auto;
     position: relative;
 }
 
@@ -662,3 +655,9 @@ html[data-darkreader-scheme="dark"] .modal-alert-message {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.8; transform: scale(0.95); }
 }
+/* Hidden Moodle drawers must not intercept clicks behind the visible drawer. */
+.drawer.hidden,
+.drawer[aria-hidden="true"] {
+    pointer-events: none !important;
+}
+

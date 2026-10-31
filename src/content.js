@@ -22,20 +22,26 @@
     // Global variables
     let availableCourses = [];
     let loadStartTime = null; // Record load start time
-    const MIN_LOAD_DURATION_MS = 500; // Minimum display duration (0.5s)
+    const MIN_LOAD_DURATION_MS = 0; // Do not delay an already-ready page.
     
     // Default settings
     const DEFAULT_SETTINGS = {
         headerBgColor: "#ffffff",
         headerTextColor: "#000000",
         headerStrokeColor: "#ffffff",
+        deadlineColor: "#2563eb",
+        deadlineSoonColor: "#ea580c",
+        deadlineUrgentColor: "#e11d48",
         backgroundUrl: '',
         backgroundType: 'none',
         opacity: 80,
         brightness: 100,
         showTimetable: true,
+        refinedUI: false,
+        enableAnimations: false,
         enableCustomLayout: false, 
         contentOpacity: 70,
+        contentAlign: 'center',
         fontFamily: "default", 
         customFontName: "",
         customFontUrl: "",
@@ -78,8 +84,38 @@
     let timelineDeadlines = []; 
     let countdownTimerInterval = null;
     let timelinePoller = null; 
+    let deadlineObserver = null;
+    let deadlineRefreshTimer = null;
     let pollAttempts = 0; 
     const MAX_POLL_ATTEMPTS = 60;
+    let startupSettingsPromise;
+    let startupDBPromise;
+    let lastDarkReaderSettings = '';
+    const FAST_UI_CACHE_KEY = 'moodle_fast_ui_cache_v1';
+    function cacheVisualSettings(settings) {
+        try {
+            const { localBackgroundUrl, backgroundUrl, ...visual } = settings;
+            localStorage.setItem(FAST_UI_CACHE_KEY, JSON.stringify(visual));
+        } catch (_) {}
+    }
+    // Cached presentation is provisional; chrome.storage remains authoritative.
+    try {
+        const cached = JSON.parse(localStorage.getItem(FAST_UI_CACHE_KEY) || 'null');
+        if (cached) {
+            document.documentElement.classList.toggle('mce-refined-ui', !!cached.refinedUI);
+            applyContentAlignment(cached.contentAlign);
+            document.documentElement.classList.toggle('mce-animations', !!cached.enableAnimations);
+            document.documentElement.style.setProperty('--mce-content-opacity', String((cached.contentOpacity ?? 70) / 100));
+            const earlyStyle = document.createElement('style');
+            earlyStyle.id = 'mce-early-ui';
+            if (/^#[a-f\d]{6}$/i.test(cached.headerBgColor) && /^#[a-f\d]{6}$/i.test(cached.headerTextColor)) {
+                earlyStyle.textContent = `.navbar { background-color:${cached.headerBgColor}!important; } .navbar-brand,.navbar-nav .nav-link,#customSettingsBtn {color:${cached.headerTextColor}!important;}`;
+            }
+            document.documentElement.appendChild(earlyStyle);
+            const mode = localStorage.getItem(DARKMODE_ENABLED_KEY) || cached.darkModeMode;
+            injectDarkReaderLogic({...DEFAULT_SETTINGS, ...cached, darkModeMode: mode});
+        }
+    } catch (_) {}
     
     // DarkReader cache (for fast application)
     try {
@@ -92,49 +128,7 @@
         console.warn("Fast font apply failed:", e);
     }
     
-    // FOUC protection: Fastest inline style injection (before init())
-    // Switched to visibility control because previous inline injection could not prevent FOUC.
-    // Guaranteed to run at the top of content.js
-
-    try {
-        const storedDarkModeMode = localStorage.getItem(DARKMODE_ENABLED_KEY) || 'off';
-        const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        
-        const shouldDarkQuickCheck = (
-            storedDarkModeMode === 'on' ||
-            (storedDarkModeMode === 'auto' && isSystemDark)
-        );
-        
-        if (shouldDarkQuickCheck && document.readyState === 'loading') {
-            const inlineStyleContent = `
-        /* Hide everything momentarily to prevent white flash */
-        /* Fix: Make visibility:hidden depend on dark-fouc-mask class */
-        html:not(.dark-fouc-mask-ready) { 
-            visibility: hidden !important; 
-            background-color: #303030 !important;
-        }
-        /* Class to display after Dark Reader loads. Added in init() or navigation */
-        html.dark-fouc-mask-ready { 
-            visibility: visible !important; 
-        }
-    `;
-            const style = document.createElement('style');
-            style.id = 'extreme-fouc-fix';
-            style.textContent = inlineStyleContent;
-            
-            // Expect document.documentElement to exist and insert
-            (document.head || document.documentElement).prepend(style);
-            
-            // Add class simultaneously with style tag insertion (fastest insurance)
-            document.documentElement.classList.add("dark-fouc-mask");
-
-        } else if (shouldDarkQuickCheck) {
-            // If running at document_end/idle, do not control visibility, rely only on mask CSS
-             document.documentElement.classList.add("dark-fouc-mask");
-        }
-    } catch(e) {
-        // Error likely in dev environment, ignoring
-    }
+    // Startup theme and fallback are owned by early-theme.js and Dark Reader.
 
      function injectCustomLoadingScreen() {
         if (!document.getElementById('moodle-custom-loading-screen')) {
@@ -162,7 +156,11 @@
      */
     function removeCustomLoadingScreen() {
     const customLoadingScreen = document.getElementById('moodle-custom-loading-screen');
-    if (!customLoadingScreen) return;
+    if (!customLoadingScreen) {
+        document.documentElement.classList.remove('dark-fouc-mask');
+        document.documentElement.classList.add('dark-fouc-mask-ready');
+        return;
+    }
 
     const elapsedTime = Date.now() - loadStartTime;
     const remainingTime = MIN_LOAD_DURATION_MS - elapsedTime;
@@ -244,6 +242,13 @@
     }
 
     function injectDarkReaderLogic(settings) {
+        if (!document.documentElement) return;
+        const themeSignature = JSON.stringify([
+            settings.darkModeMode, settings.darkModeBrightness, settings.darkModeContrast,
+            settings.darkModeGrayscale, settings.darkModeSepia
+        ]);
+        if (themeSignature === lastDarkReaderSettings) return;
+        lastDarkReaderSettings = themeSignature;
         
         // 1. Embed settings data as DOM element
         let settingsData = document.getElementById('darkreader-settings-data');
@@ -251,30 +256,13 @@
             settingsData = document.createElement('script');
             settingsData.id = 'darkreader-settings-data';
             settingsData.type = 'application/json';
-            document.head.appendChild(settingsData);
+            (document.head || document.documentElement).appendChild(settingsData);
         }
         settingsData.textContent = JSON.stringify(settings);
         
-        // 2. Inject Dark Reader library (only once)
-        let drLibScript = document.getElementById('darkreader-library-script');
-        if (!drLibScript) {
-            drLibScript = document.createElement('script');
-            drLibScript.id = 'darkreader-library-script';
-            drLibScript.src = chrome.runtime.getURL("darkreader.js"); 
-            drLibScript.setAttribute('data-skip-loader', 'true'); 
-            document.head.appendChild(drLibScript);
-        }
-        
-        // 3. Inject bridge script for initialization and settings application (runs every time)
-        let initScript = document.getElementById('dr-init-bridge-script');
-        if(initScript) {
-            initScript.remove(); 
-        }
-        
-        initScript = document.createElement('script');
-        initScript.id = 'dr-init-bridge-script';
-        initScript.src = chrome.runtime.getURL("dr_init_bridge.js");
-        document.head.appendChild(initScript);
+        // The manifest loads the engine once in MAIN world at document_start.
+        // Keep settings in the DOM so either execution order can reconcile them.
+        document.dispatchEvent(new CustomEvent('mce-theme-settings'));
     }
 
     /**
@@ -307,10 +295,10 @@ async function init() {
     // Static styles (dynamically generated)
     injectDashboardLayoutStyles(); 
     
-    await setupIndexedDB(); // DB load is async but needed for settings retrieval
+    const dbReady = startupDBPromise;
     
     // 3. [Load official settings]
-    const settings = await getSettings(); 
+    const settings = await startupSettingsPromise;
     const shouldDarkFinal = (
         settings.darkModeMode === 'on' ||
         (settings.darkModeMode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
@@ -322,19 +310,6 @@ async function init() {
          document.body.classList.remove('dark-mode-fouc-temp');
          // Fix: If Dark Mode is not needed, fast FOUC mask is also not needed, so remove it to display screen
          document.documentElement.classList.remove("dark-fouc-mask");
-    } else {
-         injectCustomLoadingScreen(); // Insert custom loading screen
-         
-         // [Important] Set forced timeout
-         // Force remove loading screen if Dark Reader application event doesn't fire by 2 seconds
-         setTimeout(() => {
-             const loader = document.getElementById('moodle-custom-loading-screen');
-             // Force remove if opacity is 1 (fade-out hasn't started)
-             if (loader && loader.style.opacity === '1') {
-                 console.warn("Dark Reader loading timed out. Forcing removal of loading screen.");
-                 removeCustomLoadingScreen();
-             }
-         }, 2000); // Execute after 2 seconds
     }
     
     
@@ -343,7 +318,7 @@ async function init() {
     }
     
     // 5. Load DarkReader and trigger style application after load completion (runs in background)
-    loadDarkReader(settings);
+    // Authoritative theme was already started in getSettings, before media loading.
 
     // Inject UI elements and apply initial styles
     if (document.body) {
@@ -352,9 +327,7 @@ async function init() {
         document.addEventListener('DOMContentLoaded', () => startUIInjection(settings));
     }
 
-    if (document.URL.includes('/course/view.php')) {
-            initAttendanceFeature();
-    }
+    // Attendance is injected once by startUIInjection.
 
     // Initial scan (wait for Moodle load)
     setTimeout(scanCoursesFromPage, 2000); 
@@ -366,7 +339,26 @@ async function init() {
         console.log("------------------------------------------");
     };
 
-    initReferenceSidebar(); 
+    // Media and the reference viewer load independently of the initial UI.
+    dbReady.then(async () => {
+        const initialBackground = settings.backgroundUrl;
+        if (initialBackground === 'indexeddb' || initialBackground?.startsWith('blob:')) {
+            const fileData = await loadFileFromDB();
+            if (currentSettings.backgroundUrl !== initialBackground) {
+                if (fileData?.url) URL.revokeObjectURL(fileData.url);
+                return;
+            }
+            if (fileData?.url) {
+                currentBG_BlobUrl = fileData.url;
+                currentSettings.localBackgroundUrl = fileData.url;
+                currentSettings.backgroundType = fileData.type.startsWith('video/') ? 'video' : 'image';
+                currentSettings.backgroundUrl = 'indexeddb';
+                injectBackgroundElements();
+                applyBackgroundStyle(currentSettings);
+            }
+        }
+        initReferenceSidebar();
+    }).catch(error => console.warn('Background media unavailable:', error));
 
     // ----------------------
 }
@@ -378,23 +370,26 @@ async function init() {
             'header .site-name a'             
         ];
         
-        // Fix: Increased font size from 0.6em -> 0.9em
-        // Adjusted position (top) slightly down to prevent excessive protrusion
-        const newTitleHtml = 'POLITE<sup style="font-size: 0.9em; top: -0.4em; margin-left: 2px;">+</sup>';
-
         for (const selector of selectors) {
             const element = document.querySelector(selector);
             if (element) {
                 const originalText = element.textContent.trim();
                 if (originalText.length > 0) {
-                    element.innerHTML = newTitleHtml;
-                    
-                    element.style.fontWeight = '700';
-                    element.style.letterSpacing = '1.5px'; 
-                    element.style.display = 'inline-flex'; 
-                    element.style.alignItems = 'center';
-                    
-                    console.log(`Moodle Customizer: Site title changed to "POLITE+".`);
+                    if (element.querySelector('.mce-brand-wordmark')) return;
+                    const wordmark = document.createElement('span');
+                    wordmark.className = 'mce-brand-wordmark';
+                    for (const [className, label] of [
+                        ['mce-brand-name', 'POLITE'],
+                        ['mce-brand-plus', '+']
+                    ]) {
+                        const part = document.createElement('span');
+                        part.className = className;
+                        part.textContent = label;
+                        wordmark.appendChild(part);
+                    }
+                    element.classList.add('mce-site-brand');
+                    element.setAttribute('aria-label', 'POLITE+');
+                    element.replaceChildren(wordmark);
                     return;
                 }
             }
@@ -406,12 +401,11 @@ async function init() {
         injectGithubButton(); 
         injectSettingsButton();
         injectSettingsModal(settings);
+        require('./dashboard-guide.js')();
         
-        const timetable = await getTimetable(); 
-        injectEditModal(timetable); 
-
-        // Apply custom styles (do not reload settings asynchronously for the first time, use init settings)
-        await applyAllCustomStyles(false); 
+        // Apply visual styles before any timetable/storage waits.
+        const stylesReady = applyAllCustomStyles(false);
+        const timetableReady = getTimetable().then(injectEditModal);
 
         if (document.URL.includes('/my/')) {
             startTimelinePoller();
@@ -423,15 +417,101 @@ async function init() {
         
         changeSiteTitle(); 
 
-        bindFoucProtectionOnNavigation();
+        // No navigation mask or forced scroll: the next document starts dark.
 
         if (document.URL.includes('/course/view.php')) {
             initAttendanceFeature();
+            
         }
-
+        await Promise.all([stylesReady, timetableReady]);
     }
+   async function injectPoliteArchiveUI() {
+        return;
+        const isTargetPage = document.URL.includes('/course/view.php') || 
+                             document.URL.includes('/mod/quiz/review.php') || 
+                             document.URL.includes('/mod/');
+                             
+        if (!isTargetPage) return;
 
-  
+        // 画面の邪魔にならない小さな進捗インジケーターを左下に配置
+        const statusBadge = document.createElement("div");
+        statusBadge.id = "polite-archive-indicator";
+        statusBadge.textContent = "📦 Polite Archive: 変更をチェック中...";
+        statusBadge.style.cssText = `
+            position: fixed; bottom: 15px; left: 15px; z-index: 2147483647;
+            padding: 6px 12px; background: rgba(0,0,0,0.8); color: white;
+            border-radius: 4px; font-size: 11px; font-family: monospace;
+            pointer-events: none; transition: opacity 0.5s ease;
+        `;
+        document.body.appendChild(statusBadge);
+
+        const currentUrl = window.location.href;
+        const pageHtml = document.documentElement.outerHTML;
+
+        try {
+            // 💡 1. まず直接DBを開いて、前回の保存内容と全く同じかチェックする
+            const padb = await openPoliteArchiveDB();
+            const tx = padb.transaction("pages", "readonly");
+            const store = tx.objectStore("pages");
+            
+            const getRequest = store.get(currentUrl);
+            getRequest.onsuccess = async (e) => {
+                const existingPage = e.target.result;
+                
+                // 💡 【超重要】中身が前回の保存時と完全に一致していれば、ここで即終了（スキップ）
+                if (existingPage && existingPage.html === pageHtml) {
+                    statusBadge.textContent = "✅ このコースは変更ありません（保存スキップ）";
+                    setTimeout(() => {
+                        statusBadge.style.opacity = "0";
+                        setTimeout(() => statusBadge.remove(), 500);
+                    }, 1500);
+                    padb.close();
+                    return; 
+                }
+                padb.close(); // 一旦閉じる
+
+                // 💡 2. 変更があった、または新規ページなら、content.js側から直接DBに即時書き込み！
+                // これでバックグラウンドの不調に関係なく、100%確実に履歴に残るようになる
+                const padbWrite = await openPoliteArchiveDB();
+                const txWrite = padbWrite.transaction("pages", "readwrite");
+                txWrite.objectStore("pages").put({
+                    url: currentUrl,
+                    html: pageHtml,
+                    savedAt: new Date().toISOString()
+                });
+                txWrite.oncomplete = () => padbWrite.close();
+
+                // 3. 新しいリンクや課題（/mod/）の巡回・保存だけをバックグラウンドにお願いする
+                statusBadge.textContent = "📦 変更を検知: アーカイブ更新中...";
+                
+                chrome.runtime.onMessage.addListener((msg) => {
+                    if (msg.type === "ARCHIVE_PROGRESS") {
+                        statusBadge.textContent = `📦 Archive自動保存中... ${msg.current}/${msg.total}`;
+                        if (msg.current === msg.total) {
+                            statusBadge.textContent = `✅ このコースの更新完了 (${msg.total})`;
+                            setTimeout(() => {
+                                statusBadge.style.opacity = "0";
+                                setTimeout(() => statusBadge.remove(), 500);
+                            }, 3000);
+                        }
+                    }
+                });
+
+                chrome.runtime.sendMessage({
+                    type: "START_SINGLE_ARCHIVE",
+                    url: currentUrl,
+                    html: pageHtml
+                }).catch((err) => {
+                    console.warn("Archive通信失敗:", err.message);
+                    statusBadge.remove();
+                });
+            };
+        } catch (err) {
+            console.warn("Polite Archive初期チェック失敗:", err);
+            statusBadge.remove();
+        }
+    }
+    
 
     // --- Feature: Auto-scan course info ---
     function scanCoursesFromPage() {
@@ -576,6 +656,7 @@ async function init() {
 
     // --- CSS: For layout adjustment (create frame only) ---
     function injectDashboardLayoutStyles() {
+        if (document.getElementById('dashboard-fullwidth-layout-css')) return;
         const style = document.createElement('style');
         style.id = 'dashboard-fullwidth-layout-css';
         document.head.appendChild(style);
@@ -583,10 +664,37 @@ async function init() {
 
     // --- Feature: Toggle layout ---
     function toggleDashboardLayout(enabled) {
+        document.documentElement.classList.toggle('mce-layout-expanded', !!enabled);
         const style = document.getElementById('dashboard-fullwidth-layout-css');
         if (!style) return;
 
-        if (!document.URL.includes('/my/') || document.URL.includes('/my/courses.php')) {
+        if (document.URL.includes('/my/courses.php')) {
+            style.innerHTML = enabled ? `
+                @media (min-width: 992px) {
+                    body#page-my-index #page.drawers .main-inner,
+                    body#page-my-index .header-maxwidth {
+                        max-width: 1600px !important;
+                        width: calc(100% - 48px) !important;
+                        margin-left: auto !important;
+                        margin-right: auto !important;
+                    }
+                    body#page-my-index .block_myoverview .card-grid {
+                        display: grid !important;
+                        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)) !important;
+                        gap: 12px !important;
+                        margin: 0 !important;
+                    }
+                    body#page-my-index .block_myoverview .card-grid > .col {
+                        max-width: none !important;
+                        width: auto !important;
+                        min-width: 0 !important;
+                        margin: 0 !important;
+                    }
+                }
+            ` : '';
+            return;
+        }
+        if (!document.URL.includes('/my/')) {
             style.innerHTML = ''; 
             return;
         }
@@ -739,10 +847,10 @@ async function init() {
     }
 
     // --- Settings (Storage) ---
-    async function getSettings() {
+    async function getSettings(dbReady, deferBackground = false) {
         // Async retrieve settings from chrome.storage.local
-        const storedSettings = await chrome.storage.local.get(SETTINGS_STORAGE_KEY);
-        const storedDarkmode = await chrome.storage.local.get(DARKMODE_SETTINGS_KEY);
+        const storedSettings = await chrome.storage.local.get([SETTINGS_STORAGE_KEY, DARKMODE_SETTINGS_KEY]);
+        const storedDarkmode = storedSettings;
         
         let settings;
         let darkmodeSettings = {};
@@ -779,11 +887,20 @@ async function init() {
 
         // 4. Merge all settings
         currentSettings = { ...DEFAULT_SETTINGS, ...settings, ...darkmodeSettings };
+        applyDeadlineColors(currentSettings);
+        cacheVisualSettings(currentSettings);
+        document.documentElement.classList.toggle('mce-refined-ui', !!currentSettings.refinedUI);
+        applyContentAlignment(currentSettings.contentAlign);
+        document.documentElement.classList.toggle('mce-animations', !!currentSettings.enableAnimations);
+        // Theme and component styling need not wait for background media.
+        if (dbReady && document.head) loadDarkReader(currentSettings);
 
         // 5. Background URL processing
-        if (currentSettings.backgroundUrl === 'indexeddb' || currentSettings.backgroundUrl.startsWith('blob:')) {
+        if (!deferBackground && (currentSettings.backgroundUrl === 'indexeddb' || currentSettings.backgroundUrl.startsWith('blob:'))) {
+             if (startupDBPromise) await startupDBPromise;
              // Load file stored in IndexedDB
-             const fileData = await loadFileFromDB(); 
+             if (dbReady) await dbReady;
+             const fileData = await loadFileFromDB();
              if (fileData && fileData.url) {
                  currentBG_BlobUrl = fileData.url; 
                  currentSettings.localBackgroundUrl = fileData.url; 
@@ -796,6 +913,7 @@ async function init() {
              }
         }
         
+        if (dbReady) await dbReady;
         return currentSettings;
     }
 
@@ -810,6 +928,7 @@ async function init() {
     }
 
  async function saveSettings(settings) {
+    cacheVisualSettings(settings);
     if (currentBG_BlobUrl && currentBG_BlobUrl !== settings.backgroundUrl) {
         URL.revokeObjectURL(currentBG_BlobUrl);
         currentBG_BlobUrl = null;
@@ -871,11 +990,12 @@ async function init() {
 
         const settingItem = document.createElement('li');
         settingItem.classList.add('nav-item');
+        settingItem.style.cssText = 'display: flex; align-items: center;';
         settingItem.innerHTML = `
             <button id="customSettingsBtn" class="btn nav-link" style="
                 background: none; border: none; padding: 0.5rem 0.8rem;
                 cursor: pointer; font-size: 1.25rem; line-height: 1;
-            " title="Moodleカスタム設定">
+            " title="Moodleカスタム設定" aria-label="Moodleカスタム設定">
                 <i class="icon fa fa-cog" aria-hidden="true"></i> </button>
         `;
         usermenu.prepend(settingItem);
@@ -891,6 +1011,7 @@ async function init() {
             
             modal.style.display = 'flex';
             document.body.style.overflow = 'hidden';
+
         });
     }
 
@@ -971,6 +1092,16 @@ async function init() {
                         </div>
 
                         <div class="settings-group">
+                            <div class="group-title">締切の強調色</div>
+                            <div class="color-picker-grid">
+                                <div class="color-item"><label for="deadlineColorInput">一覧に掲載</label><div class="color-wrapper"><input type="color" id="deadlineColorInput" value="${settings.deadlineColor}"></div></div>
+                                <div class="color-item"><label for="deadlineSoonColorInput">3日以内</label><div class="color-wrapper"><input type="color" id="deadlineSoonColorInput" value="${settings.deadlineSoonColor}"></div></div>
+                                <div class="color-item"><label for="deadlineUrgentColorInput">24時間以内・期限超過</label><div class="color-wrapper"><input type="color" id="deadlineUrgentColorInput" value="${settings.deadlineUrgentColor}"></div></div>
+                            </div>
+                            <p class="status-text">締切一覧・時間割・課題一覧に反映します。ダークモードでは明るさを調整します。</p>
+                        </div>
+
+                        <div class="settings-group">
                             <div class="group-title">Background Media</div>
                             <input type="file" id="backgroundFileInput" accept="image/*,video/*" style="display: none;">
                             <button id="selectBackgroundBtn" class="modern-btn primary-btn full-width"><i class="fa fa-folder-open"></i> ファイルを選択 (Image/Video)</button>
@@ -1032,6 +1163,12 @@ async function init() {
                         </div>
                         <div class="settings-group">
                             <div class="group-title">Content Area</div>
+                            <div class="input-wrapper">
+                                <label for="contentAlignSelect">本文の位置</label>
+                                <select id="contentAlignSelect" class="modern-select">
+                                    <option value="left">左寄せ</option><option value="center">中央</option><option value="right">右寄せ</option>
+                                </select>
+                            </div>
                             <div class="slider-container">
                                 <div class="slider-label">
                                     <span>ブロック透明度</span>
@@ -1045,9 +1182,21 @@ async function init() {
                         <div class="settings-group">
                             <div class="group-title">Widgets</div>
                             <label class="toggle-switch" style="margin-bottom: 10px;">
+                                <input type="checkbox" id="enableAnimationsCheckbox" ${settings.enableAnimations ? 'checked' : ''}>
+                                <span class="slider"></span>
+                                <span class="label-text">アニメーションを使う</span>
+                            </label>
+                            <p style="font-size:15px;">カード・ボタンの反応と、課題・クイズの完了確認時に短い動きを付けます。端末の「動きを減らす」設定を優先します。</p>
+                            <label class="toggle-switch" style="margin-bottom: 16px;">
+                                <input type="checkbox" id="refinedUICheckbox" ${settings.refinedUI ? 'checked' : ''}>
+                                <span class="slider"></span>
+                                <span class="label-text">洗練UIを使う（PC向け）</span>
+                            </label>
+                            <p style="font-size:15px;">コース・課題・ナビゲーションの見た目を整えます。オフで元の表示に戻ります。</p>
+                            <label class="toggle-switch" style="margin-bottom: 10px;">
                                 <input type="checkbox" id="enableCustomLayoutCheckbox" ${settings.enableCustomLayout ? 'checked' : ''}>
                                 <span class="slider"></span>
-                                <span class="label-text">ダッシュボードのレイアウトを拡張 (PC用)</span>
+                                <span class="label-text">ダッシュボード・マイコースのレイアウトを拡張 (PC用)</span>
                             </label>
                             <label class="toggle-switch">
                                 <input type="checkbox" id="showTimetableCheckbox" ${settings.showTimetable ? 'checked' : ''}>
@@ -1208,6 +1357,9 @@ async function init() {
         document.getElementById('headerBgColorInput').value = settings.headerBgColor;
         document.getElementById('headerTextColorInput').value = settings.headerTextColor;
         document.getElementById('headerStrokeColorInput').value = settings.headerStrokeColor;
+        for (const key of ['deadlineColor', 'deadlineSoonColor', 'deadlineUrgentColor']) {
+            document.getElementById(key + 'Input').value = settings[key] || DEFAULT_SETTINGS[key];
+        }
 
         const info = document.getElementById('currentBackgroundInfo');
         const bgVideoRadio = document.getElementById('bg-type-video');
@@ -1233,9 +1385,12 @@ async function init() {
         document.getElementById('brightnessValue').textContent = settings.brightness;
         
         document.getElementById('showTimetableCheckbox').checked = settings.showTimetable;
+        document.getElementById('refinedUICheckbox').checked = !!settings.refinedUI;
+        document.getElementById('enableAnimationsCheckbox').checked = !!settings.enableAnimations;
         document.getElementById('enableCustomLayoutCheckbox').checked = settings.enableCustomLayout;
 
         document.getElementById('contentOpacityRange').value = settings.contentOpacity;
+        document.getElementById('contentAlignSelect').value = settings.contentAlign || 'center';
         document.getElementById('contentOpacityValue').textContent = settings.contentOpacity;
 
         document.getElementById('fontFamilySelect').value = settings.fontFamily || 'default';
@@ -1252,6 +1407,7 @@ async function init() {
         document.getElementById('darkModeGrayscaleValue').textContent = settings.darkModeGrayscale;
         document.getElementById('darkModeSepiaRange').value = settings.darkModeSepia;
         document.getElementById('darkModeSepiaValue').textContent = settings.darkModeSepia;
+        document.getElementById('custom-settings-modal')?.dispatchEvent(new Event('mce-settings-values-loaded'));
     }
 
     function applyBackgroundPreview() {
@@ -1315,7 +1471,35 @@ async function init() {
         const fileInput = document.getElementById('backgroundFileInput');
         const selectFileBtn = document.getElementById('selectBackgroundBtn');
         const layoutCheckbox = document.getElementById('enableCustomLayoutCheckbox');
+        document.getElementById('contentAlignSelect').addEventListener('change',event=>applyContentAlignment(event.target.value));
+        const refinedCheckbox = document.getElementById('refinedUICheckbox');
+        document.getElementById('enableAnimationsCheckbox').addEventListener('change', event => {
+            document.documentElement.classList.toggle('mce-animations', event.target.checked);
+        });
+        refinedCheckbox.addEventListener('change', () => {
+            document.documentElement.classList.toggle('mce-refined-ui', refinedCheckbox.checked);
+        });
         
+        const clearAllArchiveBtn = document.getElementById('archive-clear-all-btn');
+        if (clearAllArchiveBtn) {
+            clearAllArchiveBtn.addEventListener('click', async () => {
+                if (confirm('本当に保存されたすべてのPolite Archiveを削除しますか？\nこの操作は取り消せません。')) {
+                    try {
+                        const padb = await openPoliteArchiveDB();
+                        const tx = padb.transaction("pages", "readwrite");
+                        tx.objectStore("pages").clear();
+                        tx.oncomplete = () => {
+                            padb.close(); // しっかり閉じる
+                            renderArchiveHistoryList(); // 一覧を空にする
+                            alert('すべてのアーカイブを削除しました。');
+                        };
+                    } catch(e) {
+                        alert("削除エラー: " + e.message);
+                    }
+                }
+            });
+        }
+
         // Dark Mode related elements
         const modeSelect = document.getElementById('darkModeModeSelect');
         const dmBrightnessRange = document.getElementById('darkModeBrightnessRange');
@@ -1334,6 +1518,11 @@ async function init() {
         headerBgInput.addEventListener('input', applyHeaderPreview);
         headerTextInput.addEventListener('input', applyHeaderPreview);
         headerStrokeInput.addEventListener('input', applyHeaderPreview);
+        for (const key of ['deadlineColor', 'deadlineSoonColor', 'deadlineUrgentColor']) {
+            document.getElementById(key + 'Input').addEventListener('input', () => {
+                applyDeadlineColors(Object.fromEntries(['deadlineColor', 'deadlineSoonColor', 'deadlineUrgentColor'].map(name => [name, document.getElementById(name + 'Input').value])));
+            });
+        }
 
         opacityRange.addEventListener('input', applyBackgroundPreview);
         brightnessRange.addEventListener('input', applyBackgroundPreview);
@@ -1387,11 +1576,17 @@ async function init() {
                     headerBgColor: headerBgInput.value,
                     headerTextColor: headerTextInput.value,
                     headerStrokeColor: headerStrokeInput.value,
+                    deadlineColor: document.getElementById('deadlineColorInput').value,
+                    deadlineSoonColor: document.getElementById('deadlineSoonColorInput').value,
+                    deadlineUrgentColor: document.getElementById('deadlineUrgentColorInput').value,
                     opacity: parseInt(opacityRange.value),
                     brightness: parseInt(brightnessRange.value),
                     showTimetable: document.getElementById('showTimetableCheckbox').checked,
+                    refinedUI: document.getElementById('refinedUICheckbox').checked,
+                    enableAnimations: document.getElementById('enableAnimationsCheckbox').checked,
                     enableCustomLayout: layoutCheckbox.checked,
                     contentOpacity: parseInt(contentOpacityRange.value),
+                    contentAlign: document.getElementById('contentAlignSelect').value,
                     fontFamily: document.getElementById('fontFamilySelect').value,
                     customFontName: document.getElementById('customFontNameInput').value,
                     customFontUrl: document.getElementById('customFontUrlInput').value,
@@ -1403,15 +1598,21 @@ async function init() {
                     darkModeSepia: parseInt(dmSepiaRange.value)
                 };
                 
-                await saveSettings(newSettings);
+                try {await saveSettings(newSettings);} catch(error) {
+                    saveBtn.disabled=false;saveBtn.textContent='変更を保存';
+                    require('./action-feedback')(saveBtn,'保存できませんでした。もう一度お試しください。',true);return;
+                }
                 modal.style.display = 'none';
                 document.body.style.overflow = '';
                 applyAllCustomStyles(true); 
+                require('./action-feedback')(document.getElementById('customSettingsBtn'),'設定を保存しました');
             });
         }
         if (closeBtn) {
             closeBtn.addEventListener('click', async () => {
                 const settings = await getSettings(); 
+                document.documentElement.classList.toggle('mce-refined-ui', !!settings.refinedUI);
+                document.documentElement.classList.toggle('mce-animations', !!settings.enableAnimations);
                 applyHeaderStyles(settings); 
                 applyBackgroundStyle(settings);
                 applyContentOpacityStyle(settings.contentOpacity);
@@ -1462,7 +1663,7 @@ async function init() {
                     await saveSettings(DEFAULT_SETTINGS);
                     loadSettingsToForm(DEFAULT_SETTINGS);
                     applyAllCustomStyles(true); 
-                    alert('カスタム設定をリセットし、反映しました。');
+                    require('./action-feedback')(resetBtn,'初期設定に戻しました');
                 }
             });
         }
@@ -1471,7 +1672,7 @@ async function init() {
         function bindFoucProtectionOnNavigation() {
     // Function to apply FOUC mask
     const applyMask = () => {
-        document.documentElement.classList.add("dark-fouc-mask");
+        document.documentElement.classList.add('dark-fouc-mask-ready');
         // Force scroll to top
         window.scrollTo(0, 0); 
     };
@@ -1541,6 +1742,21 @@ async function init() {
 
 
     // VI. Dynamic Style Application
+    function applyContentAlignment(value){
+        document.documentElement.dataset.mceContentAlign=['left','center','right'].includes(value)?value:'center';
+    }
+
+    function applyDeadlineColors(settings) {
+        const css = require('./deadline-palette.js')(settings);
+        let style = document.getElementById('mce-deadline-palette');
+        if (!style) {
+            style = document.createElement('style');
+            style.id = 'mce-deadline-palette';
+            style.className = 'mce-deadline-palette';
+            (document.head || document.documentElement).append(style);
+        }
+        if (style.textContent !== css) style.textContent = css;
+    }
 
     async function applyAllCustomStyles(reloadSettings = true) {
         if(reloadSettings) { 
@@ -1548,6 +1764,10 @@ async function init() {
         }
 
         const settings = currentSettings;
+        applyContentAlignment(settings.contentAlign);
+        applyDeadlineColors(settings);
+        document.documentElement.classList.toggle('mce-refined-ui', !!settings.refinedUI);
+        document.documentElement.classList.toggle('mce-animations', !!settings.enableAnimations);
         applyFontStyle(settings);
         injectBackgroundElements(); 
         applyHeaderStyles(settings); 
@@ -1653,6 +1873,9 @@ async function init() {
     }
 
     function applyHeaderStyles(settings) {
+        for (const [key, variable] of [['headerBgColor','--mce-header-bg'], ['headerTextColor','--mce-header-text']]) {
+            if (/^#[a-f\d]{6}$/i.test(settings[key])) document.documentElement.style.setProperty(variable, settings[key]);
+        }
         let headerStyle = document.getElementById('custom-header-style');
         if (!headerStyle) {
             headerStyle = document.createElement('style');
@@ -1718,6 +1941,9 @@ async function init() {
         
         // Determine background file URL (blob URL preferred, otherwise original URL)
         const finalBackgroundUrl = settings.localBackgroundUrl || settings.backgroundUrl;
+        document.documentElement.classList.toggle('mce-has-background', !!finalBackgroundUrl &&
+            (finalBackgroundUrl !== 'indexeddb' || !!settings.localBackgroundUrl) &&
+            ['image', 'video'].includes(settings.backgroundType));
         
         // [Fix]: 
         // 1. If background is "none" or file selected but not yet saved (blob URL missing), hide everything and exit
@@ -1808,6 +2034,7 @@ async function init() {
 
  function applyContentOpacityStyle(contentOpacity) {
         const opacityRatio = contentOpacity / 100;
+        document.documentElement.style.setProperty('--mce-content-opacity', String(opacityRatio));
 
         let contentStyle = document.getElementById('custom-content-style');
         if (!contentStyle) {
@@ -2126,7 +2353,7 @@ async function init() {
     // VII. Timetable Feature
 
     function createCourseDirectUrl(courseId) {
-        return `https://polite.do-johodai.ac.jp/moodle/course/view.php?id=${courseId}`;
+        return `https://polite.do-johodai.ac.jp/moodle/course/view.php?id=${encodeURIComponent(String(courseId))}`;
     }
 
     async function getTimetable() {
@@ -2173,6 +2400,7 @@ async function init() {
     }
 
   function generateWeeklyTimetableHtml(timetable, deadlines) {
+        const {escapeHTML, courseTone} = require('./planner-utils');
         const today = new Date();
         const currentDayName = DAY_MAP[today.getDay()];
         const { periodNumber: currentPeriod, status: currentStatus, course: currentCourse } = getCurrentClassPeriod(timetable);
@@ -2186,7 +2414,7 @@ async function init() {
                 <div style="font-size: 0.9em; font-weight: bold; margin-bottom: 15px;">
                     現在:
                     ${currentStatus === '授業中' ?
-                        `<span style="color: #dc3545;">${currentPeriod}講時 - ${currentCourse.name}</span> <a href="${createCourseDirectUrl(currentCourse.id)}" target="_self" style="font-size: 0.85em; margin-left: 10px; color: #007bff; text-decoration: none;">[コースへ]</a>` :
+                        `<span>${currentPeriod}講時 - ${escapeHTML(currentCourse.name)}</span> <a href="${createCourseDirectUrl(currentCourse.id)}" target="_self" style="font-size: 0.85em; margin-left: 10px;">コースへ</a>` :
                         `<span style="color: #6c757d;">${currentStatus} ${currentPeriod ? `(${currentPeriod}講時)` : ''}</span>`
                     }
                 </div>
@@ -2195,7 +2423,7 @@ async function init() {
                         <tr style="">
                             <th style="padding: 8px; border-bottom: 1px solid #ddd; white-space: nowrap; color: #555; width: 8%;">時間</th>
                             ${DAY_MAP.slice(1, 6).map(day =>
-                                `<th style="padding: 8px; border-bottom: 1px solid #ddd; text-align:center; width: 18.4%; color: #555; ${day === currentDayName ? 'background-color: rgba(220, 53, 69, 0.08); color: #dc3545; font-weight:bold;' : ''}">${day}</th>`
+                                `<th scope="col" data-today="${day === currentDayName}" style="padding:8px; text-align:center; width:18.4%;">${day}<span class="mce-planner-day-dot" aria-hidden="true"></span>${day === currentDayName ? '<span class="sr-only">（今日）</span>' : ''}</th>`
                             ).join('')}
                         </tr>
                     </thead>
@@ -2211,7 +2439,7 @@ async function init() {
             const endH = Math.floor(periodTime.end / 100);
             const endM = (periodTime.end % 100).toString().padStart(2, '0');
             
-            const timeStr = `<span style="display:inline-block; line-height:1.1;">${startH}:${startM}<br>｜<br>${endH}:${endM}</span>`;
+            const timeStr = `<span class="mce-period-time">${startH}:${startM}–${endH}:${endM}</span>`;
 
            htmlContent += `<tr><td style="padding: 4px; border-bottom: 1px solid #eee; font-size: 0.8em; color: #777; background-color: transparent; white-space: nowrap; text-align: center; vertical-align: middle;">${period}<br><span style="font-size:0.85em; opacity:0.8;">${timeStr}</span></td>`;
             for (let i = 1; i <= 5; i++) {
@@ -2223,9 +2451,9 @@ async function init() {
                     ? 'padding: 6px; background-color: rgba(230, 240, 255, 0.5); border-bottom: 1px solid #ddd; position: relative; vertical-align: top;' 
                     : 'padding: 6px; border-bottom: 1px solid #eee; position: relative; vertical-align: top;';
 
-                htmlContent += `<td style="${cellStyle}">`;
+                htmlContent += `<td class="mce-planner-slot ${course ? 'mce-planner-occupied' : ''}" data-today="${dayName === currentDayName}" data-current="${isCurrent}" style="${cellStyle}">`;
                 if (course) {
-                    htmlContent += `<a href="${createCourseDirectUrl(course.id)}" target="_self" title="${course.name}" style="color: #0d6efd; text-decoration: none; display:block; font-weight: 600; font-size: 0.95em; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${course.name}</a>`;
+                    htmlContent += `<div class="mce-planner-lesson" data-tone="${courseTone(course.id)}"><a class="mce-planner-course" href="${createCourseDirectUrl(course.id)}" target="_self" title="${escapeHTML(course.name)}">${escapeHTML(course.name)}</a>${isCurrent ? '<span class="mce-planner-now">授業中</span>' : ''}`;
 
                     const nTimetableName = normalizeCourseName(course.name);
                     const safeDeadlines = deadlines || [];
@@ -2243,19 +2471,19 @@ async function init() {
                            htmlContent += `
                                 <div class="timetable-deadline-card">
                                     <div class="deadline-row-top">
-                                        <span class="deadline-name" title="${deadline.assignmentName}">${deadline.assignmentName}</span>
+                                        <span class="deadline-name" title="${escapeHTML(deadline.assignmentName)}">${escapeHTML(deadline.assignmentName)}</span>
                                     </div>
                                     <div class="deadline-row-bottom">
                                         <span class="custom-countdown-timer deadline-timer" data-due-timestamp="${deadline.dueTimestamp}"></span>
-                                        <span class="deadline-date">${deadline.dueDateString}まで</span>
+                                        <span class="deadline-date">${escapeHTML(deadline.dueDateString)}まで</span>
                                     </div>
                                 </div>`;
                         });
                         htmlContent += '</div>';
                     }
-
+                    htmlContent += '</div>';
                 } else {
-                    htmlContent += `<span class="timetable-empty-cell">-</span>`;
+                    htmlContent += `<span class="timetable-empty-cell" aria-label="空きコマ">·</span>`;
                 }
                 htmlContent += `</td>`;
             }
@@ -2370,9 +2598,9 @@ async function init() {
                 const course = (timetable[day] && timetable[day][period]) ? timetable[day][period] : null;
                 bodyHtml += `
                     <div class="input-wrapper-relative">
-                        <input type="text" class="course-name-input" data-day="${day}" data-period="${period}" id="name-${day}-${period}" placeholder="科目名" value="${course ? course.name : ''}" style="width: 100%; margin-bottom: 2px; padding: 4px; border:1px solid #ccc; border-radius:3px;" autocomplete="off">
+                        <input type="text" class="course-name-input" data-day="${day}" data-period="${period}" id="name-${day}-${period}" aria-label="${day}曜日 ${period}限の科目名" placeholder="科目を検索" value="${course ? course.name : ''}" style="width: 100%; margin-bottom: 2px; padding: 4px; border:1px solid #ccc; border-radius:3px;" autocomplete="off">
                         <ul class="suggestion-list" id="suggest-${day}-${period}"></ul>
-                        <input type="number" id="id-${day}-${period}" placeholder="ID" value="${course ? course.id : ''}" style="width: 100%; padding: 4px; border:1px solid #eee; border-radius:3px; font-size:0.9em; background:#f9f9f9;">
+                        <input type="number" id="id-${day}-${period}" aria-label="${day}曜日 ${period}限のコースID" placeholder="コースID" value="${course ? course.id : ''}" style="width: 100%; padding: 4px; border:1px solid #eee; border-radius:3px; font-size:0.9em; background:#f9f9f9;">
                     </div>
                 `;
             }
@@ -2383,7 +2611,7 @@ async function init() {
             <div id="timetable-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); z-index: 10000; display: none; justify-content: center; align-items: center;">
                 <div id="timetable-modal-content" style="background-color: white; padding: 25px; border-radius: 8px; width: 95%; max-width: 950px; max-height: 95%; box-shadow: 0 5px 15px rgba(0,0,0,0.5); position: relative; display: flex; flex-direction: column;">
                     <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
-                        <h4 style="margin:0;">時間割編集</h4>
+                        <h4 id="timetable-edit-title" style="margin:0;">週間時間割を編集</h4>
                         <div>
                             <button id="exportTimetableBtn" style="padding: 6px 12px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 5px; font-size: 0.9em;">
                                 <i class="fa fa-download"></i> 書き出し
@@ -2399,13 +2627,11 @@ async function init() {
                         ${bodyHtml}
                     </div>
                     
-                    <div style="margin-top: 20px; text-align: right; flex-shrink: 0; border-top: 1px solid #eee; padding-top: 15px;">
-                        <button id="saveTimetableBtn" style="padding: 10px 30px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; font-weight:bold;">
-                            保存して適用
-                        </button>
+                    <div class="mce-action-footer" style="margin-top: 20px; text-align: right; flex-shrink: 0; border-top: 1px solid #eee; padding-top: 15px;">
                         <button id="closeTimetableModal" style="padding: 10px 20px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
                             キャンセル
                         </button>
+                        <button id="saveTimetableBtn" style="padding:10px 30px; background-color:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">保存して適用</button>
                     </div>
                 </div>
             </div>
@@ -2418,12 +2644,24 @@ async function init() {
         document.body.insertAdjacentHTML('beforeend', modalHtml);
 
         const modal = document.getElementById('timetable-modal');
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-labelledby', 'timetable-edit-title');
+        modal.addEventListener('keydown', e => {
+            if (e.key === 'Escape') { e.preventDefault(); document.getElementById('closeTimetableModal').click(); }
+            if (e.key !== 'Tab') return;
+            const items = [...modal.querySelectorAll('button,input')].filter(el => !el.disabled && el.getClientRects().length);
+            const first = items[0], last = items[items.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        });
         injectSuggestionStyles(); // サジェスト用CSSを注入
         
         // Save/Close buttons
         document.getElementById('saveTimetableBtn').addEventListener('click', saveAndRenderTimetable);
         document.getElementById('closeTimetableModal').addEventListener('click', () => {
             modal.style.display = 'none';
+            document.getElementById('editTimetableBtn')?.focus();
         });
 
         // Feature: Backup (Export/Import)
@@ -2437,6 +2675,7 @@ async function init() {
             a.download = "moodle_timetable_backup.json";
             a.click();
             URL.revokeObjectURL(url);
+            require('./action-feedback')(document.getElementById('exportTimetableBtn'),'書き出しを開始しました');
         });
 
         document.getElementById('importTimetableBtn').addEventListener('click', () => {
@@ -2451,12 +2690,12 @@ async function init() {
                 try {
                     const json = JSON.parse(event.target.result);
                     await saveTimetable(json);
-                    alert('時間割データを読み込みました。画面を更新します。');
                     modal.remove(); // Remove modal to regenerate
                     injectEditModal(json); // Re-inject with new data
                     document.getElementById('timetable-modal').style.display = 'flex';
+                    require('./action-feedback')(document.getElementById('importTimetableBtn'),'時間割を読み込みました');
                 } catch (err) {
-                    alert('ファイルの読み込みに失敗しました。正しいJSONファイルか確認してください。');
+                    require('./action-feedback')(document.getElementById('importTimetableBtn'),'読み込みに失敗しました。JSONファイルを確認してください。',true);
                 }
             };
             reader.readAsText(file);
@@ -2543,9 +2782,12 @@ async function init() {
         newTimetable["土"] = {};
         newTimetable["日"] = {};
 
-        await saveTimetable(newTimetable);
+        try {await saveTimetable(newTimetable);} catch(error) {
+            require('./action-feedback')(document.getElementById('saveTimetableBtn'),'保存できませんでした。もう一度お試しください。',true);return;
+        }
         document.getElementById('timetable-modal').style.display = 'none';
         await renderTimetableWidget();
+        require('./action-feedback')(document.getElementById('editTimetableBtn'),'時間割を保存しました');
     }
 
 
@@ -2553,7 +2795,7 @@ async function init() {
 
     function formatRemainingTime(seconds) {
         if (seconds <= 0) {
-            return '<span class="timer-expired">[ 期限切れ ]</span>';
+            return '<span class="timer-expired">期限超過</span>';
         }
 
         const d = Math.floor(seconds / (3600 * 24));
@@ -2570,8 +2812,7 @@ async function init() {
             parts.push(`<b>${m}</b>分`);
             
             // "Warning" if within 3 days, "Danger" if within 1 day
-            if (d <= 3) urgencyClass = 'timer-warning';
-            if (d <= 1) urgencyClass = 'timer-danger'; 
+            if (seconds <= 3 * 86400) urgencyClass = 'timer-warning';
         } else if (h > 0) {
             parts.push(`<b>${h}</b>時間`);
             parts.push(`<b>${m}</b>分`);
@@ -2719,6 +2960,22 @@ async function init() {
     }
 
     function startTimelinePoller() {
+        if (!document.documentElement.dataset.mceTimelineColors) {
+            document.documentElement.dataset.mceTimelineColors = 'true';
+            require('./timeline-color-settings.js')({
+                read: () => currentSettings,
+                preview: applyDeadlineColors,
+                save: async colors => {
+                    const stored = await chrome.storage.local.get(SETTINGS_STORAGE_KEY);
+                    const raw = stored[SETTINGS_STORAGE_KEY];
+                    const settings = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+                    await chrome.storage.local.set({[SETTINGS_STORAGE_KEY]: JSON.stringify({...settings, ...colors})});
+                    currentSettings = {...currentSettings, ...colors};
+                    cacheVisualSettings(currentSettings);
+                    applyDeadlineColors(currentSettings);
+                }
+            });
+        }
         if (timelinePoller) {
             clearInterval(timelinePoller);
         }
@@ -2734,6 +2991,19 @@ async function init() {
 
                 parseTimelineDeadlines(); 
                 applyDeadlineHighlight();
+                if (!deadlineObserver) {
+                    const block = document.querySelector('.block_timeline');
+                    let scheduled = false;
+                    deadlineObserver = new MutationObserver(() => {
+                        if (scheduled) return;
+                        scheduled = true;
+                        requestAnimationFrame(() => { scheduled = false; applyDeadlineHighlight(); });
+                    });
+                    deadlineObserver.observe(block, {childList: true, subtree: true});
+                }
+                if (!deadlineRefreshTimer) deadlineRefreshTimer = setInterval(() => {
+                    if (!document.hidden) applyDeadlineHighlight();
+                }, 60000);
 
                 if (timelineDeadlines.length > 0) {
                     await renderTimetableWidget(); 
@@ -2752,30 +3022,37 @@ async function init() {
         if (!timelineBlock) return;
 
         const dateGroups = timelineBlock.querySelectorAll('[data-region="event-list-content-date"]');
-        const MS_PER_DAY = 24 * 60 * 60 * 1000;
-        const HIGHLIGHT_DAYS = 7;
-        const now = new Date();
-        now.setHours(0, 0, 0, 0);
-        const limitDate = new Date(now.getTime() + HIGHLIGHT_DAYS * MS_PER_DAY);
-
+        const now = Date.now();
+        const dayMs = 86400000;
         dateGroups.forEach(dateGroup => {
-            const dateTimestampSeconds = parseInt(dateGroup.getAttribute('data-timestamp'));
-            const deadlineDate = new Date(dateTimestampSeconds * 1000);
-
-            if (deadlineDate >= now && deadlineDate < limitDate) {
-                const eventList = dateGroup.nextElementSibling;
-                if (eventList) {
-                    const deadlineItems = eventList.querySelectorAll('[data-region="event-list-item"]');
-                    deadlineItems.forEach(item => {
-                        const infoText = item.querySelector('.event-name-container small.mb-0')?.textContent || '';
-                        const isDue = infoText.includes('due') || infoText.includes('closes') ||
-                                     infoText.includes('提出期限') || infoText.includes('終了');
-                        if (isDue) {
-                            item.classList.add('deadline-highlight');
-                        }
-                    });
+            const base = Number(dateGroup.dataset.timestamp) * 1000;
+            if (!Number.isFinite(base)) return;
+            dateGroup.nextElementSibling?.querySelectorAll('[data-region="event-list-item"]').forEach(item => {
+                const info = item.querySelector('.event-name-container small.mb-0')?.textContent || '';
+                if (!/due|closes|提出期限|終了/i.test(info)) return;
+                const time = item.querySelector('.timeline-name > small.text-nowrap')?.textContent.match(/(\d{1,2}):(\d{2})/);
+                // Never invent a midnight deadline when Moodle supplies no time.
+                if (!time) return;
+                const due = new Date(base);
+                due.setHours(Number(time[1]), Number(time[2]), 0, 0);
+                const remaining = due.getTime() - now;
+                const level = remaining < 0 ? 'overdue' : remaining < 3600000 ? 'critical' : remaining < dayMs ? 'urgent' : remaining <= 3 * dayMs ? 'soon' : 'normal';
+                let label;
+                if (remaining < 0) label = '期限超過';
+                else if (remaining < 3600000) label = `締切直前 · あと${Math.max(1, Math.ceil(remaining / 60000))}分`;
+                else if (remaining < dayMs) label = `${due.toDateString() === new Date(now).toDateString() ? '今日締切' : '24時間以内'} · あと${Math.ceil(remaining / 3600000)}時間`;
+                else label = `締切まであと${Math.ceil(remaining / dayMs)}日`;
+                item.classList.add('deadline-highlight');
+                if (item.dataset.mceDeadline !== level) item.dataset.mceDeadline = level;
+                let badge = item.querySelector('.mce-deadline-badge');
+                if (!badge) {
+                    badge = document.createElement('div');
+                    badge.className = 'mce-deadline-badge';
+                    (item.querySelector('.event-name-container') || item).prepend(badge);
                 }
-            }
+                if (badge.textContent !== label) badge.textContent = label;
+                badge.title = `締切：${due.toLocaleString('ja-JP')}`;
+            });
         });
     }
 
@@ -3430,11 +3707,12 @@ async function init() {
 
 
 
-        async function updateAndSave(courseId, courseData, container) {
+        async function updateAndSave(courseId, courseData, container, notice) {
             const allData = await getAttendanceData();
             allData[courseId] = courseData;
             await saveAttendanceData(allData);
             renderAttendanceWidgetContent(container, courseId, courseData);
+            if(notice)require('./action-feedback')(container.querySelector('#'+notice[0]),notice[1]);
         }
 
         // --- Feature: Reference Sidebar (Persistence: State, File, and Width) ---
@@ -3527,10 +3805,11 @@ async function init() {
                 position: fixed !important;
                 top: 0 !important; left: 0 !important; 
                 width: 100vw !important; height: 100vh !important;
-                z-index: 2147483647 !important; 
+                z-index: 2147483647 !important;
                 cursor: col-resize !important;
                 display: none;
                 background: transparent !important;
+                pointer-events: none !important;
             }
             .ref-floating-btn {
                 position: fixed !important;
@@ -3566,14 +3845,20 @@ async function init() {
                 <div style="display:flex; gap:5px;">
                     <input type="file" id="ref-file-input" accept=".pdf,.txt" style="display:none;">
                     <button id="ref-load-btn" class="btn btn-primary btn-sm" style="padding: 2px 8px; font-size: 12px;">開く</button>
+                    <button id="ref-url-toggle" class="btn btn-secondary btn-sm" type="button" aria-expanded="false" aria-controls="ref-url-form">URL</button>
                     <button id="ref-close-sidebar" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 12px;">閉じる</button>
                 </div>
             </div>
+            <form id="ref-url-form" hidden>
+                <label for="ref-url-input">POLITEのPDF・資料ページのURL</label>
+                <div class="ref-url-row"><input id="ref-url-input" type="url" placeholder="https://polite.do-johodai.ac.jp/…" required><button type="submit" class="btn btn-primary">表示</button></div>
+                <p id="ref-url-status" role="status"></p>
+            </form>
             <div class="ref-sidebar-content">
-                <iframe id="ref-viewer-iframe"></iframe>
+                <iframe id="ref-viewer-iframe" title="参考資料"></iframe>
                 <div id="ref-placeholder" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #adb5bd; width: 80%;">
                     <i class="fa fa-file-pdf-o" style="font-size: 40px; opacity: 0.3; margin-bottom: 10px;"></i>
-                    <p style="font-size: 12px;">PDF/TXTを選択してください</p>
+                    <p style="font-size: 14px;">PDF/TXTファイルを選択するか、POLITEのPDF URLを指定してください</p>
                 </div>
             </div>
         `;
@@ -3590,23 +3875,103 @@ async function init() {
         if (!overlay.parentElement) document.body.appendChild(overlay);
 
         const sidebar = document.getElementById('moodle-ref-sidebar-container');
+        require('./reference-layout')(sidebar);
         const iframe = document.getElementById('ref-viewer-iframe');
         const fileInput = document.getElementById('ref-file-input');
         const resizeHandle = document.getElementById('ref-resize-handle');
+        let referenceObjectURL = null;
+        let referenceSelection = 0;
+        const showReference = blob => {
+            const previous = referenceObjectURL;
+            referenceObjectURL = URL.createObjectURL(blob);
+            iframe.src = referenceObjectURL;
+            iframe.style.display = 'block';
+            document.getElementById('ref-placeholder').style.display = 'none';
+            if (previous) URL.revokeObjectURL(previous);
+        };
+        const persistReference = (blob, sourceURL = '') => new Promise((resolve, reject) => {
+            if (!db || !db.objectStoreNames.contains(REF_STORE_NAME)) {reject(new Error('資料の保存先を開けませんでした。')); return;}
+            const transaction = db.transaction([REF_STORE_NAME], 'readwrite');
+            transaction.objectStore(REF_STORE_NAME).put({id:REF_KEY, blob, type:blob.type, sourceURL});
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = transaction.onabort = () => reject(transaction.error || new Error('資料を保存できませんでした。'));
+        });
+        const urlForm = document.getElementById('ref-url-form');
+        const urlToggle = document.getElementById('ref-url-toggle');
+        const urlInput = document.getElementById('ref-url-input');
+        const urlStatus = document.getElementById('ref-url-status');
+        urlToggle.addEventListener('click', () => {
+            urlForm.hidden = !urlForm.hidden;
+            urlToggle.setAttribute('aria-expanded', String(!urlForm.hidden));
+            if (!urlForm.hidden) urlInput.focus();
+        });
+        let referenceRequest = null;
+        const loadReferenceURL = async ({autoClose = false, feedbackTarget = null} = {}) => {
+            const button = urlForm.querySelector('button');
+            referenceRequest?.abort();
+            button.disabled = true;
+            const selection=++referenceSelection;
+            const requestedURL=urlInput.value.trim();
+            urlStatus.textContent = 'PDFを読み込み中…';
+            const controller = new AbortController();
+            referenceRequest = controller;
+            const timer = setTimeout(() => controller.abort(), 30000);
+            try {
+                const result = await require('./reference-pdf.js').loadPDF(requestedURL, {base:location.href, signal:controller.signal});
+                if(selection!==referenceSelection)return;
+                showReference(result.blob);
+                if (autoClose) {
+                    if (urlForm.contains(document.activeElement)) urlToggle.focus();
+                    urlForm.hidden = true;
+                    urlToggle.setAttribute('aria-expanded', 'false');
+                }
+                if (feedbackTarget) require('./action-feedback')(feedbackTarget, 'PDFを表示しました');
+                try {
+                    await persistReference(result.blob, requestedURL);
+                    if(selection===referenceSelection)urlStatus.textContent = 'PDFを表示しました。次回も復元されます。';
+                } catch (_) {if(selection===referenceSelection)urlStatus.textContent = 'PDFを表示しましたが、保存できませんでした。';}
+            } catch (error) {
+                if(selection===referenceSelection) {
+                    urlStatus.textContent = error.name === 'AbortError' ? '読み込みがタイムアウトしました。もう一度お試しください。' : error.message;
+                    urlForm.hidden = false;
+                    urlToggle.setAttribute('aria-expanded', 'true');
+                    if (feedbackTarget) require('./action-feedback')(feedbackTarget, urlStatus.textContent, true);
+                }
+            } finally {
+                clearTimeout(timer);
+                if (referenceRequest === controller) {referenceRequest = null; button.disabled = false;}
+            }
+        };
+        urlForm.addEventListener('submit', event => {
+            event.preventDefault();
+            if (!urlForm.querySelector('button').disabled) loadReferenceURL();
+        });
 
         const openSidebar = () => {
+            overlay.style.display = 'none';
+            sidebar.classList.remove('resizing');
             sidebar.classList.add('open');
             toggleBtn.style.display = 'none';
             localStorage.setItem(SIDEBAR_STATE_KEY, 'open');
         };
 
         const closeSidebar = () => {
+            overlay.style.display = 'none';
+            sidebar.classList.remove('resizing');
             sidebar.classList.remove('open');
             setTimeout(() => { if (!sidebar.classList.contains('open')) toggleBtn.style.display = 'flex'; }, 350);
             localStorage.setItem(SIDEBAR_STATE_KEY, 'closed');
         };
+        require('./pdf-reference-buttons').connect((url,button)=>{
+            try {
+                referenceSelection++;
+                require('./pdf-reference-buttons').fillReference(url,{input:urlInput,form:urlForm,toggle:urlToggle,status:urlStatus,open:openSidebar});
+                loadReferenceURL({autoClose:true, feedbackTarget:button});
+            } catch(error) {require('./action-feedback')(button,error.message,true);}
+        });
 
         const restoreSidebar = async () => {
+            const selection=referenceSelection;
 
             const savedWidth = localStorage.getItem(SIDEBAR_WIDTH_KEY);
             if (savedWidth) {
@@ -3619,11 +3984,11 @@ async function init() {
                     const transaction = db.transaction([storeName], 'readonly');
                     const request = transaction.objectStore(storeName).get(REF_KEY);
                     request.onsuccess = (e) => {
+                        if(selection!==referenceSelection)return;
                         const data = e.target.result;
                         if (data && data.blob) {
-                            iframe.src = URL.createObjectURL(data.blob);
-                            iframe.style.display = 'block';
-                            document.getElementById('ref-placeholder').style.display = 'none';
+                            showReference(data.blob);
+                            urlInput.value = data.sourceURL || '';
                         }
                     };
                 } catch (err) { console.warn(err); }
@@ -3646,6 +4011,7 @@ async function init() {
       fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    referenceSelection++;
 
     if (db) {
         // 【修正】STORE_NAMEを使わず、必ず 'reference_files' を指定
@@ -3656,9 +4022,10 @@ async function init() {
         }
     }
 
-            iframe.src = URL.createObjectURL(file);
-            iframe.style.display = 'block';
-            document.getElementById('ref-placeholder').style.display = 'none';
+            showReference(file);
+            urlInput.value = '';
+            urlStatus.textContent = '';
+            fileInput.value = '';
         });
 
         resizeHandle.addEventListener('pointerdown', (startEvent) => {
@@ -3696,6 +4063,30 @@ async function init() {
 
         }
 
+        // Fetch authoritative settings during parsing, not after DOMContentLoaded.
+        // DB rejection must never prevent controls or theme styles from appearing.
+        startupDBPromise = setupIndexedDB().catch(error => {
+            console.warn('IndexedDB unavailable:', error);
+            return null;
+        });
+        startupSettingsPromise = getSettings(undefined, true).then(settings => {
+            const applyEarly = () => {
+                if (!document.head) return false;
+                injectDashboardLayoutStyles();
+                applyHeaderStyles(settings);
+                applyContentOpacityStyle(settings.contentOpacity);
+                toggleDashboardLayout(settings.enableCustomLayout);
+                applyDarkmodeStyle(settings);
+                return true;
+            };
+            if (!applyEarly()) {
+                const observer = new MutationObserver(() => {
+                    if (applyEarly()) observer.disconnect();
+                });
+                observer.observe(document.documentElement, {childList:true});
+            }
+            return settings;
+        });
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', init);
         } else {
@@ -3812,6 +4203,7 @@ async function init() {
 
     function renderAttendanceWidgetContent(container, courseId, courseData) {
         const status = calculateAttendanceStatus(courseData);
+        container.dataset.mceAttendance = status.isUnitFailed ? 'failed' : status.remainingSafeAbsences <= 1 ? 'danger' : status.remainingSafeAbsences <= 2 ? 'warning' : 'safe';
         
         // --- テーマカラー設定（青ベース） ---
         // デフォルト（余裕あり）を青 (#007bff) に変更
@@ -3902,7 +4294,7 @@ async function init() {
                     </button>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1.3fr; gap: 8px; margin-bottom: 20px;">
+                <div class="mce-att-metrics" style="display: grid; grid-template-columns: 1fr 1fr 1fr 1.3fr; gap: 8px; margin-bottom: 20px;">
                     <div style="text-align: center; background: #f8f9fa; padding: 10px 5px; border-radius: 8px;">
                         <div style="font-size: 0.7rem; color: #666; margin-bottom: 2px;">出席</div>
                         <div style="font-size: 1.6rem; font-weight: 800; color: #333; line-height: 1.1;">${courseData.attended}</div>
@@ -3917,7 +4309,7 @@ async function init() {
                     </div>
                     <div style="text-align: center; background: ${uiTheme.bg}; padding: 10px 5px; border-radius: 8px; border: 1px solid ${uiTheme.color};">
                         <div style="font-size: 0.7rem; color: ${uiTheme.color}; font-weight: bold; margin-bottom: 2px; white-space: nowrap;">あと休める</div>
-                        <div style="font-size: 1.6rem; font-weight: 800; color: ${uiTheme.color}; line-height: 1.1;">${remainingDisplay}</div>
+                        <div style="font-size: 1.6rem; font-weight: 800; color: ${uiTheme.color}; line-height: 1.1;"><span>${remainingDisplay}</span>${status.isUnitFailed ? '' : '<span class="mce-att-unit">回</span>'}</div>
                         <div style="font-size: 0.65rem; color: ${uiTheme.color}; opacity: 0.8;">${remainingLabel}</div>
                     </div>
                 </div>
@@ -3932,7 +4324,7 @@ async function init() {
                    </div>
                 </div>
 
-                <div style="display: flex; gap: 8px; margin-bottom: 15px;">
+                <div class="mce-att-actions" style="display: flex; gap: 8px; margin-bottom: 15px;">
                     <button id="btn-add-attend" class="modern-btn" ${disableButtons} flex: 2; background: linear-gradient(135deg, #007bff 0%, #0056b3 100%); color: white; border: none; padding: 10px; border-radius: 8px; font-weight: bold; box-shadow: 0 2px 5px rgba(0, 123, 255, 0.3);">
                         <i class="fa fa-check"></i> 出席
                     </button>
@@ -3983,21 +4375,27 @@ async function init() {
                     </div>
                 </div>
                 
-                <div style="display: flex; gap: 10px; margin-bottom: 25px;">
-                    <button id="att-cancel-cfg" class="modern-btn secondary-btn" style="flex: 1; padding: 8px;">キャンセル</button>
-                    <button id="att-save-cfg" class="modern-btn primary-btn" style="flex: 1; padding: 8px;">保存</button>
-                </div>
-
                 <div style="border-top: 1px solid #eee; padding-top: 15px; text-align: center;">
                     <button id="att-reset-data" class="modern-btn" style="background: #fff; color: #dc3545; border: 1px solid #dc3545; padding: 8px 15px; font-size: 0.85em; width: 100%;">
                         <i class="fa fa-trash"></i> データをリセット (全消去)
                     </button>
                 </div>
 
-                <div style="height: 20px;"></div>
+                <div class="mce-action-footer">
+                    <button id="att-cancel-cfg" class="modern-btn secondary-btn">キャンセル</button>
+                    <button id="att-save-cfg" class="modern-btn primary-btn">保存</button>
+                </div>
             </div>
         `;
         container.innerHTML = html;
+        container.querySelector('.card-body > div:first-child')?.classList.add('mce-att-header');
+        container.querySelector('.mce-att-metrics > div:last-child')?.classList.add('mce-att-remaining');
+        container.querySelector('#att-settings-btn')?.setAttribute('aria-label','出席管理の設定');
+        const todayBadge = container.querySelector('.card-body > div:first-child > div:first-child > div');
+        if (todayBadge) {
+            todayBadge.classList.add('mce-att-today');
+            todayBadge.dataset.state = status.isActionDoneToday ? status.lastLog.type : status.isUnitFailed ? 'failed' : 'none';
+        }
 
         // イベントリスナー
         const btnAttend = container.querySelector('#btn-add-attend');
@@ -4009,7 +4407,7 @@ async function init() {
                 if (status.isMaxReached) return;
                 courseData.attended++;
                 courseData.logs.push({ type: 'attend', timestamp: Date.now(), wasUndone: false });
-                await updateAndSave(courseId, courseData, container);
+                await updateAndSave(courseId, courseData, container,['btn-add-attend','出席を記録しました']);
             });
         }
 
@@ -4018,7 +4416,7 @@ async function init() {
                 if (status.isMaxReached) return;
                 courseData.late++;
                 courseData.logs.push({ type: 'late', timestamp: Date.now(), wasUndone: false });
-                await updateAndSave(courseId, courseData, container);
+                await updateAndSave(courseId, courseData, container,['btn-add-late','遅刻を記録しました']);
             });
         }
 
@@ -4027,7 +4425,7 @@ async function init() {
                 if (status.isMaxReached) return;
                 courseData.absent++;
                 courseData.logs.push({ type: 'absent', timestamp: Date.now(), wasUndone: false });
-                await updateAndSave(courseId, courseData, container);
+                await updateAndSave(courseId, courseData, container,['btn-add-absent','欠席を記録しました']);
             });
         }
 
@@ -4063,14 +4461,15 @@ async function init() {
                 wasUndone: false 
             });
 
-            await updateAndSave(courseId, courseData, container);
+            await updateAndSave(courseId, courseData, container,['btn-undo-att','直前の記録を取り消しました']);
         });
 
         const historyList = container.querySelector('#att-history-list');
         const historyToggle = container.querySelector('#att-history-toggle');
         historyToggle.addEventListener('click', () => {
-            const isHidden = historyList.style.display === 'none';
-            historyList.style.display = isHidden ? 'block' : 'none';
+            const motion=require('./disclosure-motion');
+            const isHidden = !motion.isPanelOpen(historyList);
+            motion.animatePanel(historyList,isHidden);
             historyToggle.querySelector('.fa-chevron-down').style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
         });
 
@@ -4093,9 +4492,9 @@ async function init() {
                 courseData.config.requiredRatio = num / denom;
                 courseData.config.latesPerAbsence = newLateLimit;
                 
-                await updateAndSave(courseId, courseData, container);
+                await updateAndSave(courseId, courseData, container,['att-settings-btn','出席管理の設定を保存しました']);
             } else {
-                alert('正しい値を入力してください');
+                require('./action-feedback')(container.querySelector('#att-save-cfg'),'回数と分数には正の整数を入力してください。',true);
             }
         });
 
@@ -4107,13 +4506,322 @@ async function init() {
                 courseData.absent = 0;
                 courseData.logs = [];
                 await updateAndSave(courseId, courseData, container);
-                alert('データをリセットしました。');
+                require('./action-feedback')(container.querySelector('#att-settings-btn'),'出席記録を初期化しました');
                 settingsPanel.style.display = 'none';
             }
         });
         
         applyContentOpacityStyle(currentSettings.contentOpacity);
     }
+   function openPoliteArchiveDB() {
+        return new Promise((resolve, reject) => {
+            // 💡 バージョンを 1 に指定して開く
+            const request = indexedDB.open("PoliteArchive", 2);
+            
+            // ストアがなかったらここで作成するロジックを追加
+            request.onupgradeneeded = e => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains("pages")) {
+                    db.createObjectStore("pages", { keyPath: "url" });
+                }
+            };
+            
+            request.onsuccess = e => resolve(e.target.result);
+            request.onerror = e => reject(e);
+        });
+    }
 
+    async function renderArchiveHistoryList() {
+        const listContainer = document.getElementById('archive-history-list');
+        if (!listContainer) return;
+
+        listContainer.innerHTML = '<div style="text-align:center; color:#999; padding:10px;">🔍 アーカイブを取得中...</div>';
+
+        try {
+            const dbPromise = openPoliteArchiveDB();
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("DB接続タイムアウト")), 3000));
+            
+            const padb = await Promise.race([dbPromise, timeoutPromise]);
+            
+            if (!padb.objectStoreNames.contains("pages")) {
+                listContainer.innerHTML = '<div style="text-align:center; color:#999; padding:10px;">保存されたページはまだありません</div>';
+                padb.close();
+                return;
+            }
+
+            const tx = padb.transaction("pages", "readonly");
+            const store = tx.objectStore("pages");
+            const request = store.getAll();
+
+            request.onsuccess = (e) => {
+                const allPages = e.target.result;
+                padb.close();
+
+                if (!allPages || allPages.length === 0) {
+                    listContainer.innerHTML = '<div style="text-align:center; color:#999; padding:10px;">保存されたアーカイブはありません</div>';
+                    return;
+                }
+
+                listContainer.innerHTML = ''; // クリア
+                
+                const courseGroups = {}; // 最終的なグループ（講義名ベース）
+                const idToCourseNameMap = {}; // id や cmid から講義名を逆引きするマップ
+                const independentPages = [];
+
+                // タイトルから純粋な講義名を抽出するヘルパー
+                const cleanCourseName = (title) => {
+                    if (!title) return "";
+                    let t = title.replace(/^コース:\s*/i, '');
+                    if (t.includes(':')) {
+                        t = t.split(':')[0]; // 「組込みシステム開発（尾崎）: 確認テスト」から講義名だけ抜く
+                    }
+                    return t.replace(/\s| | /g, '').trim();
+                };
+
+                // URLから id または cmid の数値を抽出するヘルパー
+                const getMoodleId = (url) => {
+                    const cmidMatch = url.match(/cmid=(\d+)/);
+                    if (cmidMatch) return cmidMatch[1];
+                    const idMatch = url.match(/id=(\d+)/);
+                    if (idMatch) return idMatch[1];
+                    return null;
+                };
+
+                // 💡 ステップ1: まず「コースのトップページ」から、正しい講義名とIDの関係を学習する
+                allPages.forEach(page => {
+                    let pageTitle = "名称不明のページ";
+                    if (page.html) {
+                        const titleMatch = page.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+                        if (titleMatch && titleMatch[1]) {
+                            pageTitle = titleMatch[1].replace('| POLITE', '').replace('POLITE:', '').trim();
+                        }
+                    }
+                    page.extractedTitle = pageTitle;
+                    page.moodleId = getMoodleId(page.url);
+
+                    if (page.url.includes('course/view.php') && page.moodleId) {
+                        const courseName = cleanCourseName(pageTitle);
+                        if (courseName) {
+                            idToCourseNameMap[page.moodleId] = courseName;
+                            if (!courseGroups[courseName]) {
+                                courseGroups[courseName] = { main: page, children: [] };
+                            } else {
+                                courseGroups[courseName].main = page;
+                            }
+                        }
+                    }
+                });
+
+                // 💡 ステップ2: トップページが見つからなかった場合や、小テストから講義名を推測する
+                allPages.forEach(page => {
+                    if (page.url.includes('course/view.php')) return; // トップページはスキップ済み
+                    if (page.url.includes('/my/')) return;
+
+                    let courseName = "";
+                    const mId = page.moodleId;
+
+                    // 1. すでに学習済みのIDマップにあればそれを使う
+                    if (mId && idToCourseNameMap[mId]) {
+                        courseName = idToCourseNameMap[mId];
+                    } else {
+                        // 2. タイトルに「:」が含まれていて、左側が講義名っぽいかチェック
+                        const title = page.extractedTitle;
+                        if (title.includes(':')) {
+                            const leftPart = cleanCourseName(title);
+                            // 「受験レビュー」や「確認テスト」のような一般名詞じゃなければ講義名とみなす
+                            if (leftPart && !leftPart.includes('テスト') && !leftPart.includes('レビュー') && !leftPart.includes('小テスト')) {
+                                courseName = leftPart;
+                                if (mId) idToCourseNameMap[mId] = courseName; // IDを覚える
+                            }
+                        }
+                    }
+
+                    // 3. それでも分からない場合は、HTMLの内部ソースから講義名リンクを必死に探す
+                    if (!courseName && page.html) {
+                        const navMatch = page.html.match(/href="[^"]*course\/view\.php\?id=(\d+)"[^>]*>([\s\S]*?)<\/a>/);
+                        if (navMatch && navMatch[2]) {
+                            const navTitle = navMatch[2].replace(/<[^>]*>/g, '').trim();
+                            courseName = cleanCourseName(navTitle);
+                        }
+                    }
+
+                    // 最終的に講義名が判明したらグループへ、ダメなら独立ページへ
+                    if (courseName) {
+                        if (!courseGroups[courseName]) {
+                            courseGroups[courseName] = { main: null, children: [] };
+                        }
+                        // 完全に同じURLの重複追加を防止
+                        if (!courseGroups[courseName].children.some(c => c.url === page.url)) {
+                            courseGroups[courseName].children.push(page);
+                        }
+                    } else {
+                        if (!independentPages.some(p => p.url === page.url)) {
+                            independentPages.push(page);
+                        }
+                    }
+                });
+
+                const sortByDate = (a, b) => new Date(b.savedAt) - new Date(a.savedAt);
+                independentPages.sort(sortByDate);
+
+                // 💡 ステップ3: 画面へ綺麗にレンダリング（描画）
+                Object.keys(courseGroups).forEach(courseName => {
+                    const group = courseGroups[courseName];
+                    const mainPage = group.main;
+                    const children = group.children.sort(sortByDate);
+
+                    const folderTitle = courseName;
+                    const folderUrl = mainPage ? mainPage.url : (children.length > 0 ? children[0].url : "");
+                    const folderDate = mainPage ? new Date(mainPage.savedAt) : (children.length > 0 ? new Date(children[0].savedAt) : new Date());
+                    const dateStr = `${folderDate.getMonth() + 1}/${folderDate.getDate()} ${String(folderDate.getHours()).padStart(2, '0')}:${String(folderDate.getMinutes()).padStart(2, '0')}`;
+
+                    const courseWrapper = document.createElement('div');
+                    courseWrapper.style.cssText = 'border: 1px solid #e9ecef; border-radius: 6px; margin-bottom: 8px; background: #f8f9fa; overflow: hidden;';
+
+                    let html = `
+                        <div class="course-group-header" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #e9ecef; gap: 10px;">
+                            <div style="flex-grow: 1; min-width: 0; text-align: left; cursor: pointer;" onclick="const el = this.closest('.course-group-header').nextElementSibling; el.style.display = el.style.display === 'none' ? 'block' : 'none';">
+                                <strong style="color: #333; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">📁 コース: ${folderTitle} (${children.length}p)</strong>
+                                <span style="font-size: 0.7rem; color: #777; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${folderUrl}</span>
+                            </div>
+                            <div style="flex-shrink: 0; text-align: right; font-size: 0.8rem;">
+                                <span style="color: #666; display: block; font-family: monospace; font-size: 11px;">📸 ${dateStr}</span>
+                                ${mainPage ? `<button class="open-archive-btn" data-url="${mainPage.url}" style="background:#007bff; color:#fff; border:none; padding:2px 6px; border-radius:3px; cursor:pointer; font-size: 11px; margin-right:5px;">開く</button>` : ''}
+                                ${mainPage ? `<button class="delete-single-archive-btn" data-url="${mainPage.url}" style="background:none; border:none; color:#dc3545; cursor:pointer; padding:2px; font-size:11px;">削除</button>` : ''}
+                            </div>
+                        </div>
+                        <div class="course-group-children" style="display: none; padding: 5px 10px; background: #fff; border-top: 1px solid #e9ecef;">
+                    `;
+
+                    if (children.length === 0) {
+                        html += '<div style="text-align:center; color:#999; font-size:0.8rem; padding:10px;">内部資料のアーカイブはありません</div>';
+                    } else {
+                        children.forEach(child => {
+                            const cDate = new Date(child.savedAt);
+                            const cDateStr = `${cDate.getMonth() + 1}/${cDate.getDate()} ${String(cDate.getHours()).padStart(2, '0')}:${String(cDate.getMinutes()).padStart(2, '0')}`;
+                            
+                            // 表示用タイトルをスッキリさせる
+                            let displayChildTitle = child.extractedTitle;
+                            if (displayChildTitle.includes(':')) {
+                                const parts = displayChildTitle.split(':');
+                                // 左側が講義名と同じなら、右側の「確認テスト(1)」だけを表示
+                                if (cleanCourseName(parts[0]) === courseName) {
+                                    displayChildTitle = parts.slice(1).join(':').trim();
+                                }
+                            }
+
+                            html += `
+                                <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 5px; border-bottom: 1px solid #f1f3f5; gap: 10px; margin-left: 15px;">
+                                    <div style="flex-grow: 1; min-width: 0; text-align: left;">
+                                        <span style="color: #495057; font-weight: 500; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${child.extractedTitle}">📄 ${displayChildTitle}</span>
+                                        <span style="font-size: 0.7rem; color: #999; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${child.url}</span>
+                                    </div>
+                                    <div style="flex-shrink: 0; text-align: right; font-size: 0.75rem;">
+                                        <span style="color: #888; display: block; font-family: monospace; margin-bottom: 2px;">📸 ${cDateStr}</span>
+                                        <button class="open-archive-btn" data-url="${child.url}" style="background:#17a2b8; color:#fff; border:none; padding:1px 5px; border-radius:3px; cursor:pointer; font-size: 11px; margin-right:3px;">開く</button>
+                                        <button class="delete-single-archive-btn" data-url="${child.url}" style="background:none; border:none; color:#dc3545; cursor:pointer; padding:1px; font-size:11px;">削除</button>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                    }
+
+                    html += `</div>`;
+                    courseWrapper.innerHTML = html;
+                    listContainer.appendChild(courseWrapper);
+                });
+
+                // その他（ダッシュボード等）
+                independentPages.forEach(page => {
+                    const sDate = new Date(page.savedAt);
+                    const sDateStr = `${sDate.getMonth() + 1}/${sDate.getDate()} ${String(sDate.getHours()).padStart(2, '0')}:${String(sDate.getMinutes()).padStart(2, '0')}`;
+                    const div = document.createElement('div');
+                    div.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 8px 5px; border-bottom: 1px solid rgba(0,0,0,0.05); gap: 10px;';
+                    div.innerHTML = `
+                        <div style="flex-grow: 1; min-width: 0; text-align: left;">
+                            <span style="color: #212529; font-weight: 600; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">🔗 ${page.extractedTitle}</span>
+                            <span style="font-size: 0.72rem; color: #888; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${page.url}</span>
+                        </div>
+                        <div style="flex-shrink: 0; text-align: right; font-size: 0.8rem;">
+                            <span style="color: #666; display: block; font-family: monospace;">📸 ${sDateStr}</span>
+                            <button class="open-archive-btn" data-url="${page.url}" style="background:#007bff; color:#fff; border:none; padding:2px 6px; border-radius:3px; cursor:pointer; margin-right:5px;">開く</button>
+                            <button class="delete-single-archive-btn" data-url="${page.url}" style="background:none; border:none; color:#dc3545; cursor:pointer; padding:2px; font-size:11px;">削除</button>
+                        </div>
+                    `;
+                    listContainer.appendChild(div);
+                });
+
+                // イベント紐付け（開く）
+                listContainer.querySelectorAll('.open-archive-btn').forEach(btn => {
+                    btn.onclick = async (evt) => {
+                        evt.preventDefault();
+                        const url = btn.dataset.url;
+                        try {
+                            const db = await openPoliteArchiveDB();
+                            const tx = db.transaction("pages", "readonly");
+                            const req = tx.objectStore("pages").get(url);
+                            
+                            req.onsuccess = (e) => {
+                                const data = e.target.result;
+                                if (!data || !data.html) {
+                                    alert("アーカイブデータが見つかりません。");
+                                    return;
+                                }
+                                const newTab = window.open();
+                                if (!newTab) {
+                                    alert("ポップアップがブロックされました。");
+                                    return;
+                                }
+                                newTab.document.open();
+                                newTab.document.write(data.html);
+                                
+                                const base = newTab.document.createElement('base');
+                                base.href = "https://" + window.location.hostname;
+                                newTab.document.head.appendChild(base);
+                                
+                                newTab.document.close();
+                            };
+                        } catch (err) { alert("エラー: " + err.message); }
+                    };
+                });
+
+                // イベント紐付け（削除）
+                listContainer.querySelectorAll('.delete-single-archive-btn').forEach(btn => {
+                    btn.onclick = async (evt) => {
+                        evt.preventDefault();
+                        const url = btn.dataset.url;
+                        if (confirm('このアーカイブを削除しますか？')) {
+                            try {
+                                const db = await openPoliteArchiveDB();
+                                const dtx = db.transaction("pages", "readwrite");
+                                dtx.objectStore("pages").delete(url);
+                                dtx.oncomplete = () => {
+                                    db.close();
+                                    renderArchiveHistoryList();
+                                };
+                            } catch (err) { alert("削除失敗: " + err.message); }
+                        }
+                    };
+                });
+            };
+
+            request.onerror = () => {
+                padb.close();
+                listContainer.innerHTML = `<div style="color:#dc3545; padding:10px;">データ取得エラー</div>`;
+            };
+
+        } catch (err) {
+            listContainer.innerHTML = `<div style="color:#dc3545; padding:10px;">⚠️ DB接続エラー</div>`;
+        }
+    }
 
 })();
+require('./ui-design.js');
+require('./course-checklist.js');
+require('./motion.js');
+require('./course-outline.js');
+require('./material-presentation.js');
+require('./disclosure-motion.js');
+require('./table-numbers.js');
+require('./pdf-reference-buttons.js');
+require('./ui-icons.js');

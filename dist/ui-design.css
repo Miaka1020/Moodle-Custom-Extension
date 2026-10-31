@@ -1,0 +1,393 @@
+:root {
+ --mce-brand:#06c755; --mce-action:#2563eb; --mce-surface:#fff; --mce-subtle:#f4f7fa;
+ --mce-text:#1a1a1a; --mce-secondary:#5b6470; --mce-success:#147d4a;
+ --mce-warning:#a15c00; --mce-danger:#c5221f; --mce-border:#d9e0e7;
+ --mce-shadow:0 2px 8px rgba(16,24,40,.08);
+}
+/* A compact wordmark that follows the user's header colour. */
+html body .mce-site-brand {
+ display:inline-flex!important; align-items:center!important; flex-shrink:0;
+ letter-spacing:normal!important; text-shadow:none!important;
+ font-family:system-ui,-apple-system,"Segoe UI",sans-serif!important;
+}
+html body .mce-brand-wordmark {
+ display:inline-flex; align-items:center; gap:3px; white-space:nowrap;
+ line-height:1; color:inherit; text-shadow:none!important;
+}
+html body .mce-brand-wordmark > span {color:inherit; text-shadow:none!important;}
+html body .mce-brand-name {font-size:20px; font-weight:650; letter-spacing:.035em;}
+html body .mce-brand-plus {align-self:flex-start; margin-top:1px; font-size:12px; font-weight:600; line-height:1;}
+@media(max-width:900px) {
+ html body .mce-brand-name {font-size:18px;}
+ html body .mce-brand-plus {font-size:11px;}
+}
+/* Menus are transient reading surfaces, independent of content transparency. */
+html body #page-wrapper .dropdown-menu,
+html body #page-wrapper .dropdown-menu .dropdown-item,
+html body #page-wrapper .dropdown-menu .list-group-item,
+html body .drawer .message-app,
+html body .drawer .message-app .card,
+html body .drawer .message-app .card-body {
+ background-color:var(--mce-surface)!important; color:var(--mce-text)!important;
+}
+html body #page-wrapper .dropdown-menu {border:1px solid var(--mce-border)!important; box-shadow:0 8px 24px rgba(16,24,40,.14)!important;}
+html body #page-wrapper .dropdown-menu .dropdown-item:hover,
+html body #page-wrapper .dropdown-menu .dropdown-item:focus {background-color:var(--mce-subtle)!important;}
+html body .block_timeline .deadline-highlight {
+ border:0!important; border-left:3px solid #2563eb!important;
+ background-color:rgba(37,99,235,.06)!important; box-shadow:none!important;
+ border-radius:0 6px 6px 0; padding-left:12px!important;
+}
+html[data-darkreader-scheme="dark"], [data-theme="dark"] {
+ --mce-surface:#20252c; --mce-subtle:#2b323c; --mce-text:#f4f7fa; --mce-secondary:#bdc7d4;
+ --mce-border:#536173; --mce-action:#93b4ff; --mce-success:#78dfa3; --mce-warning:#ffce80; --mce-danger:#ffaaa6;
+}
+#custom-settings-modal, #timetable-modal, #moodle-custom-attendance-widget, #moodle-ref-sidebar-container, .retake-controls-card {
+ color:var(--mce-text); font-family:system-ui,-apple-system,BlinkMacSystemFont,"Yu Gothic",sans-serif;
+ font-size:16px; line-height:1.6;
+}
+#custom-settings-modal *, #timetable-modal *, #moodle-custom-attendance-widget * {box-sizing:border-box;}
+#custom-settings-modal .modern-modal-content {
+ width:min(640px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); border:1px solid var(--mce-border);
+ border-radius:10px; background:var(--mce-surface); color:var(--mce-text); box-shadow:0 16px 40px rgba(16,24,40,.2);
+}
+#custom-settings-modal .modern-modal-header {padding:24px; text-align:left; background:var(--mce-surface); border-bottom:1px solid var(--mce-border);}
+#custom-settings-modal h4 {font-size:24px; color:var(--mce-text); margin:0 0 8px;}
+#custom-settings-modal .sub-text {font-size:15px; color:var(--mce-secondary); margin:0;}
+#custom-settings-modal .modern-modal-body {padding:16px 24px; overflow-y:auto; min-height:0;}
+.mce-settings-section {border-bottom:1px solid var(--mce-border); margin:0;}
+.mce-settings-section summary {padding:16px 0; font-size:16px; font-weight:600; cursor:pointer; min-height:44px; color:var(--mce-text);}
+#custom-settings-modal .settings-group {background:transparent; border:0; padding:0 0 24px; margin:0; box-shadow:none;}
+#custom-settings-modal .modern-modal-footer {padding:16px 24px; background:var(--mce-surface); border-top:1px solid var(--mce-border); flex-shrink:0; gap:12px; flex-wrap:wrap;}
+#custom-settings-modal label, #custom-settings-modal .label-text, #custom-settings-modal .slider-label {font-size:15px; color:var(--mce-text);}
+#custom-settings-modal input:not([type="checkbox"]):not([type="range"]), #custom-settings-modal select {
+ min-height:44px; max-width:100%; border:1px solid var(--mce-border); border-radius:6px; background:var(--mce-surface); color:var(--mce-text); font-size:16px;
+}
+#custom-settings-modal .color-inputs {display:flex; flex-direction:column; gap:16px;}
+#custom-settings-modal button, #timetable-modal button, #moodle-custom-attendance-widget button, #moodle-ref-sidebar-container button, .retake-controls-card button {
+ min-height:44px; min-width:44px; font-size:15px!important; border-radius:6px!important; transition:background-color .1s; box-shadow:none!important;
+}
+#custom-settings-modal .primary-btn {background:#2563eb!important; color:white!important; border:1px solid #2563eb;}
+#custom-settings-modal .secondary-btn {background:var(--mce-subtle)!important; color:var(--mce-text)!important; border:1px solid var(--mce-border);}
+#custom-settings-modal .danger {color:var(--mce-danger)!important;}
+#customSettingsBtn {
+ display:inline-flex; align-items:center; justify-content:center;
+ width:44px; height:44px; padding:0!important; border:0!important;
+ border-radius:6px; vertical-align:middle; background:transparent;
+}
+#customSettingsBtn .icon {margin:0; width:auto; height:auto; line-height:1;}
+#customSettingsBtn:hover {background:rgba(127,127,127,.12)!important;}
+#custom-settings-modal :focus-visible, #timetable-modal :focus-visible, #moodle-custom-attendance-widget :focus-visible, #moodle-ref-sidebar-container :focus-visible, #customSettingsBtn:focus-visible {
+ outline:2px solid var(--mce-action)!important; outline-offset:3px;
+}
+#custom-settings-modal button:disabled {background:var(--mce-subtle)!important; color:var(--mce-secondary)!important; cursor:wait; opacity:1;}
+#moodle-custom-attendance-widget, #customTimetableWidget, .retake-controls-card {border-radius:10px!important; box-shadow:var(--mce-shadow)!important; border:1px solid var(--mce-border)!important;}
+#moodle-custom-attendance-widget .card-body {padding:16px!important;}
+#moodle-custom-attendance-widget #btn-add-attend {background:#2563eb!important; color:#fff!important;}
+#moodle-custom-attendance-widget #btn-add-late {background:#fff2dc!important; color:#754200!important;}
+#moodle-custom-attendance-widget #btn-add-absent {background:#fce9e8!important; color:#a61c19!important;}
+#customTimetableWidget {overflow:auto;}
+#customTimetableWidget th {position:sticky; top:0; background:var(--mce-subtle); color:var(--mce-text);}
+#moodle-ref-sidebar-container .ref-sidebar-header {height:auto!important; min-height:68px; padding:12px 16px!important; background:var(--mce-subtle)!important;}
+#moodle-ref-sidebar-container .ref-sidebar-content {background:var(--mce-surface)!important;}
+@media(max-width:600px) {
+ #custom-settings-modal .modern-modal-header, #custom-settings-modal .modern-modal-body, #custom-settings-modal .modern-modal-footer {padding:16px;}
+ #custom-settings-modal .modern-modal-footer button {flex:1 1 120px;}
+ #moodle-custom-attendance-widget .card-body {overflow-wrap:anywhere;}
+}
+@media(prefers-reduced-motion:reduce) {
+ #custom-settings-modal *, #timetable-modal *, #moodle-custom-loading-screen *, #moodle-ref-sidebar-container, .retake-controls-card * {animation:none!important;transition:none!important;scroll-behavior:auto!important;}
+}
+#timetable-modal #timetable-modal-content {
+ background:var(--mce-surface)!important; color:var(--mce-text); padding:24px!important;
+ width:min(1180px,96vw)!important; max-width:1180px!important; max-height:92dvh!important;
+ border:1px solid var(--mce-border); border-radius:10px!important; box-shadow:0 16px 40px rgba(16,24,40,.2)!important;
+}
+#timetable-modal-content > div:first-child {gap:16px; padding-bottom:16px!important; margin-bottom:16px!important;}
+#timetable-edit-title {font-size:24px; font-weight:650;}
+#timetable-modal-content > div:nth-child(2) {padding:0 8px 0 0!important;}
+#timetable-modal .modal-alert-message {background:var(--mce-subtle)!important; color:var(--mce-secondary)!important; border:1px solid var(--mce-border)!important; border-radius:6px; padding:12px 16px; font-size:15px; margin-bottom:16px;}
+#timetable-modal .modal-alert-message strong {color:var(--mce-text)!important;}
+#timetable-edit-grid {grid-template-columns:88px repeat(5,minmax(140px,1fr))!important; gap:12px!important; font-size:15px!important; padding-bottom:12px;}
+#timetable-edit-grid > div:nth-child(-n+6) {position:sticky; top:0; z-index:2; background:var(--mce-surface); padding:12px 8px; border-bottom:2px solid var(--mce-border);}
+#timetable-edit-grid .input-wrapper-relative {background:transparent; border:0; border-radius:6px; padding:4px; min-width:0;}
+#timetable-edit-grid .input-wrapper-relative:focus-within {box-shadow:none;}
+#timetable-edit-grid input {box-sizing:border-box; max-width:100%; min-height:40px; padding:8px!important; font-size:15px!important; border-radius:6px!important; background:var(--mce-surface)!important; color:var(--mce-text)!important; border:1px solid var(--mce-border)!important;}
+#timetable-edit-grid input[type="number"] {margin-top:6px; font-size:13px!important; min-height:32px; color:var(--mce-secondary)!important; background:transparent!important; border-color:transparent!important;}
+#timetable-edit-grid .suggestion-list {background:var(--mce-surface); min-width:220px;}
+#timetable-modal #saveTimetableBtn {background:#2563eb!important; color:white!important; padding:10px 24px!important;}
+#timetable-modal :is(#closeTimetableModal,#exportTimetableBtn,#importTimetableBtn) {background:var(--mce-subtle)!important; color:var(--mce-text)!important; border:1px solid var(--mce-border)!important;}
+#customTimetableWidget #customTimetableTable {border-collapse:separate!important; border-spacing:0; border:1px solid var(--mce-border); border-radius:8px; overflow:hidden; width:100%;}
+#customTimetableWidget #customTimetableTable :is(th,td) {padding:14px 10px!important; border:0!important; border-bottom:1px solid var(--mce-border)!important; line-height:1.5;}
+#customTimetableWidget #customTimetableTable tr:last-child td {border-bottom:0!important;}
+#customTimetableWidget #customTimetableTable td:first-child {background:rgba(127,127,127,.05); font-weight:600;}
+#customTimetableWidget #customTimetableTable a {display:block; padding:4px; font-weight:600; border-radius:4px;}
+/* Shared, readable timetable and attendance surfaces in both modes. */
+html body #customTimetableWidget #customTimetableTable {background:transparent!important; color:var(--mce-text)!important;}
+html body #customTimetableWidget #customTimetableTable :is(th,td) {color:var(--mce-text)!important; padding:10px 8px!important; vertical-align:middle!important;}
+html body #customTimetableWidget #customTimetableTable th {background:rgba(127,127,127,.06)!important; position:static; font-weight:600;}
+html body #customTimetableWidget #customTimetableTable td {background:transparent!important; height:56px;}
+html body #customTimetableWidget #customTimetableTable th:first-child {width:100px!important;}
+.mce-period-time {display:block; white-space:nowrap; font-size:11px; font-weight:400; line-height:1.5;}
+html body #customTimetableWidget .timetable-empty-cell {color:var(--mce-secondary)!important;}
+html body #moodle-custom-attendance-widget > .card-body {padding:20px!important;}
+html body #moodle-custom-attendance-widget h5 {color:var(--mce-text)!important; font-size:18px!important;}
+html body #moodle-custom-attendance-widget .mce-att-metrics {gap:0!important; background:transparent!important; border:1px solid var(--mce-border); border-radius:10px; overflow:hidden; margin-bottom:16px!important;}
+html body #moodle-custom-attendance-widget .mce-att-metrics > div {background:transparent!important; border:0!important; border-right:1px solid var(--mce-border)!important; border-radius:0!important; padding:16px 12px!important;}
+html body #moodle-custom-attendance-widget .mce-att-metrics > div:last-child {border-right:0!important; background:transparent!important;}
+html body #moodle-custom-attendance-widget .mce-att-metrics > div > div:first-child {font-size:13px!important; color:var(--mce-secondary)!important; margin-bottom:8px!important;}
+html body #moodle-custom-attendance-widget .mce-att-metrics > div > div:nth-child(2) {font-size:28px!important; font-weight:650!important;}
+html body #moodle-custom-attendance-widget .mce-att-actions {gap:10px!important;}
+html body #moodle-custom-attendance-widget .mce-att-actions button {flex:1!important; border:1px solid var(--mce-border)!important; font-weight:600; padding:10px 16px!important;}
+html body #moodle-custom-attendance-widget .mce-att-actions :is(#btn-add-late,#btn-add-absent) {background:rgba(244,247,250,var(--mce-content-opacity,.7))!important; color:var(--mce-text)!important;}
+html body #moodle-custom-attendance-widget .mce-att-actions #btn-undo-att {flex:0 0 44px!important; padding:8px!important; background:rgba(244,247,250,var(--mce-content-opacity,.7))!important; color:var(--mce-text)!important;}
+/* Settings replace the summary in normal flow, so controls cannot be clipped by widget height. */
+html body #moodle-custom-attendance-widget:has(#att-settings-panel[style*="display: block"]) > .card-body {display:none!important;}
+html body #moodle-custom-attendance-widget #att-settings-panel {
+ position:relative!important; top:auto!important; left:auto!important; width:100%!important;
+ height:auto!important; overflow:visible!important; padding:24px!important;
+ background:var(--mce-surface)!important; color:var(--mce-text)!important; border-radius:10px!important;
+}
+html body #att-settings-panel h6 {font-size:20px!important; margin-bottom:20px!important; color:var(--mce-text);}
+html body #att-settings-panel label {font-size:15px!important; color:var(--mce-secondary)!important;}
+html body #att-settings-panel input {height:44px; max-width:100%; background:var(--mce-subtle)!important; color:var(--mce-text)!important; border:1px solid var(--mce-border)!important; font-size:16px;}
+html body #att-settings-panel #att-cfg-total {max-width:180px;}
+html body #att-settings-panel #att-save-cfg {background:#2563eb!important; color:#fff!important;}
+html body #att-settings-panel #att-cancel-cfg {background:var(--mce-subtle)!important; color:var(--mce-text)!important; border:1px solid var(--mce-border);}
+html body #att-settings-panel #att-reset-data {background:transparent!important; color:var(--mce-danger)!important; border:1px solid var(--mce-border)!important;}
+html body #att-settings-panel > div:last-child {display:none;}
+html body #moodle-custom-attendance-widget .mce-att-actions button:hover {filter:brightness(.93);}
+/* Apply opacity once on each widget, rather than stacking opaque inner surfaces. */
+html body #customTimetableWidget > .card-body,
+html body #moodle-custom-attendance-widget > .card-body {background:transparent!important;}
+html body #customTimetableWidget #customTimetableTable :is(thead,tbody,tr) {background:transparent!important;}
+html body #timetable-modal #timetable-modal-content {padding:18px 24px!important; max-height:96dvh!important;}
+html body #timetable-modal-content > div:first-child {padding-bottom:10px!important; margin-bottom:10px!important;}
+html body #timetable-modal-content > div:last-child {margin-top:10px!important; padding-top:10px!important;}
+html body #timetable-modal .modal-alert-message {padding:8px 12px!important; font-size:13px!important; margin-bottom:8px!important;}
+html body #timetable-modal-content > div:nth-child(2) > p {font-size:13px!important; margin-bottom:8px!important;}
+html body #timetable-edit-grid {grid-template-columns:80px repeat(5,minmax(0,1fr))!important; gap:6px 8px!important; padding-bottom:0!important;}
+html body #timetable-edit-grid > div:nth-child(-n+6) {padding:4px!important;}
+html body #timetable-edit-grid .input-wrapper-relative {padding:4px!important; border-radius:6px;}
+html body #timetable-edit-grid input {min-height:30px!important; height:30px; padding:4px 6px!important; font-size:14px!important;}
+html body #timetable-edit-grid input[type="number"] {min-height:24px!important; height:24px; margin-top:2px; font-size:12px!important;}
+html body #timetable-edit-grid input:focus,
+html body #timetable-edit-grid input:focus-visible {
+ outline:2px solid var(--mce-action)!important; outline-offset:0!important;
+ border-color:transparent!important; box-shadow:none!important;
+}
+html body #timetable-edit-grid > div:nth-child(n+7):not(.input-wrapper-relative) {
+ display:flex; flex-direction:column; justify-content:center; align-items:center;
+ color:var(--mce-text); gap:2px;
+}
+html body #timetable-edit-grid .input-wrapper-relative {padding:4px!important; background:transparent!important; border:0!important; box-shadow:none!important;}
+html body #timetable-edit-grid .course-name-input {margin-bottom:4px!important;}
+html body #timetable-edit-grid input[type="number"] {margin-top:0!important; opacity:1;}
+@media(max-height:800px) {
+ html body #timetable-modal .modal-alert-message p {display:none;}
+ html body #timetable-modal .modal-alert-message strong::after {content:' コース概要を「すべて表示」にすると候補が増えます。'; font-weight:400;}
+ html body #timetable-modal #timetable-edit-title {font-size:20px;}
+}
+/* Explicit contrast for extension controls in dark mode. */
+html.mce-dark-active, html[data-darkreader-scheme="dark"] {
+ --mce-surface:#202832; --mce-subtle:#2b3643; --mce-text:#edf2f7;
+ --mce-secondary:#bdc9d8; --mce-border:#4b5b6e; --mce-action:#9abbff;
+ --mce-success:#84dfb1; --mce-warning:#ffd18a; --mce-danger:#ffaaa6;
+}
+html.mce-dark-active body #moodle-custom-attendance-widget .mce-att-actions :is(#btn-add-late,#btn-add-absent,#btn-undo-att),
+html[data-darkreader-scheme="dark"] body #moodle-custom-attendance-widget .mce-att-actions :is(#btn-add-late,#btn-add-absent,#btn-undo-att) {
+ background:rgba(40,52,67,var(--mce-content-opacity,.7))!important; color:#edf2f7!important; border-color:#526478!important; opacity:1!important;
+}
+html.mce-dark-active body #moodle-custom-attendance-widget .mce-att-actions #btn-add-attend,
+html[data-darkreader-scheme="dark"] body #moodle-custom-attendance-widget .mce-att-actions #btn-add-attend {
+ background:#285ac7!important; color:#fff!important; opacity:1!important;
+}
+html.mce-dark-active body #moodle-custom-attendance-widget button:disabled {
+ background:#303a47!important; color:#aebaca!important; border-color:#4b5b6e!important; cursor:not-allowed!important;
+}
+html.mce-dark-active body #moodle-custom-attendance-widget .mce-att-metrics {
+ background:transparent!important; border-color:#4b5b6e!important;
+}
+html.mce-dark-active body #moodle-custom-attendance-widget .mce-att-metrics > div > div:nth-child(2) {color:#edf2f7!important;}
+html.mce-dark-active body #moodle-custom-attendance-widget .mce-att-metrics > div:last-child > div:nth-child(2) {color:#9abbff!important;}
+html.mce-dark-active body #moodle-custom-attendance-widget #att-settings-btn,
+html.mce-dark-active body #customSettingsBtn,
+html.mce-dark-active body #githubLinkBtnV2 {color:#edf2f7!important; text-shadow:none!important;}
+html.mce-dark-active body #githubLinkBtnV2 {border-color:#718096!important; background:transparent!important;}
+html.mce-dark-active body #custom-settings-modal :is(input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]),select),
+html.mce-dark-active body #timetable-modal :is(input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]),select),
+html.mce-dark-active body #att-settings-panel input {
+ background:#273341!important; color:#edf2f7!important; border-color:#526478!important;
+}
+html.mce-dark-active body :is(#custom-settings-modal,#timetable-modal) input::placeholder {color:#b3c0d1!important; opacity:1;}
+html.mce-dark-active body :is(#custom-settings-content,#timetable-modal-content,#att-settings-panel) {
+ background:#202832!important; color:#edf2f7!important;
+}
+html.mce-dark-active body #customTimetableWidget #customTimetableTable :is(th,td) {color:#edf2f7!important; border-color:#526478!important;}
+/* One surface per settings dialog; no independently inverted inner cards. */
+html.mce-dark-active body #custom-settings-modal #custom-settings-content,
+html.mce-dark-active body #custom-settings-modal .modern-modal-header,
+html.mce-dark-active body #custom-settings-modal .modern-modal-body,
+html.mce-dark-active body #custom-settings-modal .modern-modal-footer {
+ background:#202832!important; color:#edf2f7!important; border-color:#435266!important;
+}
+html.mce-dark-active body #custom-settings-modal .settings-group,
+html.mce-dark-active body #custom-settings-modal .mce-settings-section,
+html.mce-dark-active body #custom-settings-modal :is(.input-wrapper,.slider-container,.slider-label,.slider-value-group,.color-item) {
+ background:transparent!important; box-shadow:none!important;
+}
+html.mce-dark-active body #custom-settings-modal :is(h4,summary,label,.label-text,.slider-label) {color:#edf2f7!important;}
+html.mce-dark-active body #custom-settings-modal :is(.sub-text,.status-text,.radio-label) {color:#bdc9d8!important;}
+html.mce-dark-active body #custom-settings-modal .slider-value-group {color:#a9c6ff!important; font-size:15px!important; font-family:inherit!important; font-variant-numeric:tabular-nums;}
+html.mce-dark-active body #custom-settings-modal .modern-modal-body {scrollbar-color:#65758a #202832!important;}
+html.mce-dark-active body #custom-settings-modal .modern-modal-body::-webkit-scrollbar-thumb {background:#65758a!important;}
+html.mce-dark-active body #custom-settings-modal .modern-modal-body::-webkit-scrollbar-track {background:#202832!important;}
+html.mce-dark-active body #custom-settings-modal input[type="range"] {
+ appearance:none; -webkit-appearance:none; width:100%; height:24px!important;
+ background:transparent!important; border:0!important; padding:0!important; box-shadow:none!important;
+ accent-color:#a9c6ff;
+}
+html.mce-dark-active body #custom-settings-modal input[type="range"]::-webkit-slider-runnable-track {
+ height:4px; background:#56677d!important; border:0; border-radius:2px;
+}
+html.mce-dark-active body #custom-settings-modal input[type="range"]::-webkit-slider-thumb {
+ appearance:none; -webkit-appearance:none; width:16px; height:16px; margin-top:-6px;
+ border:2px solid #202832; border-radius:50%; background:#a9c6ff!important; box-shadow:none!important;
+}
+html.mce-dark-active body #custom-settings-modal .primary-btn {background:#285ac7!important; color:#fff!important; border-color:#4f7cda!important;}
+html.mce-dark-active body #custom-settings-modal .secondary-btn {background:#2b3643!important; color:#edf2f7!important; border-color:#526478!important;}
+html.mce-dark-active body #custom-settings-modal .color-wrapper {background:#2b3643!important; border:1px solid #526478!important;}
+/* Deadline urgency: words and shape carry the meaning as well as color. */
+/* Optional interaction motion. Never animate page wrappers, drawers or theme startup. */
+@media (prefers-reduced-motion:no-preference) {
+ html.mce-animations body :is(#custom-settings-modal,#timetable-modal,#moodle-custom-attendance-widget,#moodle-ref-sidebar-container,#mce-course-checklist,#mce-timeline-colors-panel) button:not(:disabled) {
+  transition:transform 120ms ease-out,background-color 120ms ease-out!important;
+ }
+ html.mce-animations body :is(#custom-settings-modal,#timetable-modal,#moodle-custom-attendance-widget,#moodle-ref-sidebar-container,#mce-course-checklist,#mce-timeline-colors-panel) button:not(:disabled):active {
+  transform:translateY(1px) scale(.98)!important;
+ }
+ html.mce-animations body #mce-course-checklist .mce-just-completed {
+  animation:mce-completion-flash 420ms ease-out both;
+ }
+ html.mce-animations body #mce-course-checklist .mce-just-completed .mce-checklist-evidence {
+  animation:mce-completion-settle 360ms ease-out both;
+ }
+}
+@media (prefers-reduced-motion:no-preference) and (hover:hover) and (pointer:fine) {
+ html.mce-animations body .block_myoverview :is(.dashboard-card,.course-card) {
+  transition:transform 160ms ease-out,box-shadow 160ms ease-out!important;
+ }
+ html.mce-animations body .block_myoverview :is(.dashboard-card,.course-card):hover {
+  transform:translateY(-4px);
+  box-shadow:0 5px 14px rgba(16,24,40,.14)!important;
+ }
+ html.mce-animations body .block_myoverview :is(.dashboard-card,.course-card):has([aria-expanded="true"]) {transform:none;}
+}
+@media (prefers-reduced-motion:no-preference) {
+ html.mce-animations.mce-page-enter #page-header h1,
+ html.mce-animations.mce-page-enter #block-region-content > :is(.block,#customTimetableWidget),
+ html.mce-animations.mce-page-enter .course-content > .section:nth-child(-n+8),
+ html.mce-animations.mce-page-enter #region-main > .activity-header {
+  animation:mce-page-arrive 280ms cubic-bezier(.2,.7,.3,1);
+ }
+ html.mce-animations .mce-panel-enter {animation:mce-panel-arrive 180ms ease-out!important;}
+ html.mce-animations body #mce-timeline-colors-panel {animation:mce-panel-arrive 180ms ease-out;}
+ html.mce-animations body #custom-settings-modal .toggle-switch .slider:before {transition:transform 160ms ease-out!important;}
+}
+@keyframes mce-page-arrive {
+ from {translate:0 8px;}
+ to {translate:0 0;}
+}
+@keyframes mce-panel-arrive {
+ from {translate:0 6px;}
+ to {translate:0 0;}
+}
+@keyframes mce-completion-flash {
+ from {background-color:rgba(55,181,125,.16);}
+ to {background-color:transparent;}
+}
+@keyframes mce-completion-settle {
+ from {transform:translateY(3px); opacity:.65;}
+ to {transform:translateY(0); opacity:1;}
+}
+#mce-dashboard-guide {container:mce-guide / inline-size; margin:0 0 16px; padding:0 0 16px; border-bottom:1px solid var(--mce-border,#d9e0e7); background:transparent; color:inherit; font-size:15px; line-height:1.7;}
+#mce-dashboard-guide summary {padding:8px 0; min-height:44px; box-sizing:border-box; font-size:17px; font-weight:650; cursor:pointer;}
+#mce-dashboard-guide dl {display:grid; grid-template-columns:minmax(0,1fr); gap:24px 32px; margin:16px 0 8px;}
+#mce-dashboard-guide dl > div {min-width:0;}
+#mce-dashboard-guide dt {margin:0 0 4px; color:#245fce; font-size:16px; font-weight:650;}
+#mce-dashboard-guide dd {margin:0; color:inherit;}
+#mce-dashboard-guide dd p {margin:0; max-width:44ch;}
+#mce-dashboard-guide .mce-guide-location {margin-bottom:8px; color:#536477; font-size:14px;}
+#mce-dashboard-guide summary:focus-visible {outline:2px solid var(--mce-action,#2563eb); outline-offset:2px;}
+@container mce-guide (min-width:620px) {#mce-dashboard-guide dl {grid-template-columns:repeat(2,minmax(0,1fr));}}
+@container mce-guide (min-width:1000px) {#mce-dashboard-guide dl {grid-template-columns:repeat(3,minmax(0,1fr));}}
+html.mce-dark-active #mce-dashboard-guide dt {color:#9cbeff!important;}
+html.mce-dark-active #mce-dashboard-guide .mce-guide-location {color:#bdc9d8!important;}
+#ref-url-form {padding:12px 16px; border-bottom:1px solid var(--mce-border,#d9e0e7); flex-shrink:0; font-size:15px;}
+#ref-url-form[hidden] {display:none!important;}
+#ref-url-form label {display:block; margin-bottom:8px;}
+.ref-url-row {display:flex; gap:8px;}
+#ref-url-input {flex:1; min-width:0; min-height:44px; padding:8px; border:1px solid #aab5c2; border-radius:6px; background:#fff; color:#192635;}
+#ref-url-status {margin:8px 0 0; overflow-wrap:anywhere;}
+#ref-url-status:empty {display:none;}
+html.mce-dark-active #ref-url-form {background:#202832!important; color:#edf2f7!important;}
+html.mce-dark-active #ref-url-input {background:#2b3643!important; color:#edf2f7!important; border-color:#526478!important;}
+.mce-timeline-colors-button {
+ display:inline-flex; align-items:center; justify-content:center; vertical-align:middle;
+ width:44px; height:44px; margin-inline-start:8px; padding:0; border:1px solid transparent;
+ border-radius:6px; background:transparent; color:inherit; cursor:pointer;
+}
+.mce-timeline-colors-button:hover {background:rgba(120,140,160,.12); border-color:var(--mce-border,#d9e0e7);}
+.mce-timeline-colors-button:focus-visible, #mce-timeline-colors-panel :focus-visible {outline:2px solid var(--mce-action,#2563eb); outline-offset:2px;}
+html body #mce-timeline-colors-panel {
+ box-sizing:border-box; width:100%; max-width:360px; padding:16px; margin:8px 0 16px;
+ border:1px solid var(--mce-border,#d9e0e7); border-radius:8px;
+ background:#fff!important; color:#192635!important; font-size:15px; line-height:1.5;
+}
+#mce-timeline-colors-panel > strong {display:block; margin-bottom:8px;}
+#mce-timeline-colors-panel label {display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:48px; margin:0; font-weight:400;}
+html body #mce-timeline-colors-panel input[type="color"] {width:44px!important; height:36px!important; padding:3px!important; transform:none!important; border:1px solid #aab5c2; border-radius:6px; background:transparent; cursor:pointer;}
+#mce-timeline-colors-panel p {margin:8px 0;}
+#mce-timeline-colors-panel p:empty {display:none;}
+.mce-timeline-colors-actions {display:flex; justify-content:flex-end; gap:8px; margin-top:12px;}
+#mce-timeline-colors-panel button {min-height:44px; padding:8px 16px; border:1px solid #b7c3d0; border-radius:6px; background:transparent; color:inherit; cursor:pointer;}
+#mce-timeline-colors-panel button:last-child {background:#245fce; color:#fff; border-color:#245fce;}
+#mce-timeline-colors-panel button:disabled {opacity:.6; cursor:wait;}
+html.mce-dark-active body #mce-timeline-colors-panel {background:#202832!important; color:#edf2f7!important; border-color:#526478!important;}
+html.mce-dark-active body #mce-timeline-colors-panel button:last-child {background:#285ac7!important; color:#fff!important; border-color:#709dff!important;}
+.block_timeline [data-mce-deadline] {
+ --mce-due-ink:#245fce; --mce-due-bg:rgba(37,99,235,.07); --mce-due-edge:#2563eb;
+}
+.block_timeline [data-mce-deadline="soon"] {
+ --mce-due-ink:#ac3d16; --mce-due-bg:rgba(234,88,12,.09); --mce-due-edge:#ea580c;
+}
+.block_timeline :is([data-mce-deadline="urgent"],[data-mce-deadline="critical"],[data-mce-deadline="overdue"]) {
+ --mce-due-ink:#b42332; --mce-due-bg:rgba(225,29,72,.09); --mce-due-edge:#e11d48;
+}
+html body .block_timeline [data-mce-deadline].deadline-highlight {
+ background:var(--mce-due-bg)!important; border:1px solid var(--mce-due-edge)!important;
+ border-left:1px solid var(--mce-due-edge)!important; border-radius:8px!important;
+ padding:14px 16px!important; margin-block:8px!important; box-shadow:none!important;
+}
+.block_timeline .mce-deadline-badge {
+ display:table; margin:0 0 8px; padding:4px 10px; border-radius:5px;
+ color:var(--mce-due-ink)!important; background:var(--mce-due-bg)!important;
+ font-size:15px; font-weight:700; line-height:1.5; letter-spacing:.01em;
+}
+.block_timeline [data-mce-deadline="critical"] .mce-deadline-badge::before {content:'⚠ ';}
+.block_timeline [data-mce-deadline="overdue"] .mce-deadline-badge::before {content:'! ';}
+html.mce-dark-active .block_timeline [data-mce-deadline] {--mce-due-ink:#a9c6ff; --mce-due-bg:rgba(115,157,255,.12);}
+html.mce-dark-active .block_timeline [data-mce-deadline="soon"] {--mce-due-ink:#ffb38c; --mce-due-bg:rgba(255,136,80,.12);}
+html.mce-dark-active .block_timeline :is([data-mce-deadline="urgent"],[data-mce-deadline="critical"],[data-mce-deadline="overdue"]) {--mce-due-ink:#ffabba; --mce-due-bg:rgba(255,98,130,.12);}
+html body #customTimetableWidget .timetable-deadline-card {padding:8px!important; font-size:13px!important; line-height:1.5!important; border-radius:6px;}
+html body #customTimetableWidget .custom-countdown-timer {display:block; max-width:100%!important; white-space:normal!important; overflow:visible!important; font-size:14px!important;}
+html body #customTimetableWidget .deadline-row-bottom {display:block!important; white-space:normal!important;}
+html body #customTimetableWidget .deadline-date {display:block; margin:4px 0 0; color:var(--mce-secondary)!important;}
+html body #customTimetableWidget .timer-safe {color:#245fce!important;}
+html body #customTimetableWidget .timer-warning {color:#ac3d16!important;}
+html body #customTimetableWidget :is(.timer-danger,.timer-critical,.timer-expired) {color:#b42332!important; font-weight:700;}
+html.mce-dark-active body #customTimetableWidget .timer-safe {color:#a9c6ff!important;}
+html.mce-dark-active body #customTimetableWidget .timer-warning {color:#ffb38c!important;}
+html.mce-dark-active body #customTimetableWidget :is(.timer-danger,.timer-critical,.timer-expired) {color:#ffabba!important;}
+html body #customTimetableWidget .timetable-deadline-card:has(.timer-warning) {border-left-color:#ea580c!important;}
+html body #customTimetableWidget .timetable-deadline-card:has(:is(.timer-danger,.timer-critical,.timer-expired)) {border-left-color:#e11d48!important;}

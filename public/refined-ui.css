@@ -1,0 +1,56 @@
+/* Opt-in POLITE presentation. Do not create stacking contexts on page wrappers:
+   Moodle's message drawer must remain above its body-level backdrop. */
+html.mce-refined-ui {
+ --mce-page:#f4f7fa; --mce-panel:rgba(255,255,255,var(--mce-content-opacity, .7)); --mce-ink:#192635;
+ --mce-muted:#536477; --mce-line:#dce4ec; --mce-link:#245fce;
+}
+html.mce-refined-ui[data-darkreader-scheme="dark"] {
+ --mce-page:#151b24; --mce-panel:rgba(24,26,27,var(--mce-content-opacity, .7)); --mce-ink:#edf3fc;
+ --mce-muted:#bdc9d8; --mce-line:#435269; --mce-link:#9ebfff;
+}
+html.mce-refined-ui body {background-color:var(--mce-page)!important; color:var(--mce-ink);}
+html.mce-refined-ui #page.drawers .main-inner {max-width:1200px; margin:24px auto; padding:24px; border-radius:12px;}
+html.mce-refined-ui #page-header {margin-bottom:24px;}
+html.mce-refined-ui #page-header h1 {font-size:28px; font-weight:700; line-height:1.4; letter-spacing:.01em;}
+html.mce-refined-ui #region-main {padding:0;}
+html.mce-refined-ui .secondary-navigation {border-bottom:1px solid var(--mce-line); margin-bottom:24px;}
+html.mce-refined-ui .secondary-navigation .nav-link {padding:14px 20px; font-weight:600; border-radius:6px 6px 0 0;}
+html.mce-refined-ui .secondary-navigation .nav-link.active {color:var(--mce-link)!important; border-bottom:3px solid var(--mce-link);}
+html.mce-refined-ui .course-content .section {
+ border:0!important; border-radius:0!important;
+ padding:0!important; margin:0 0 24px!important; background:transparent!important;
+ box-shadow:none!important;
+}
+html.mce-refined-ui .course-content .section > .section-item {
+ background:var(--mce-panel)!important; border:0!important; border-radius:10px!important;
+ padding:20px!important; box-shadow:0 2px 8px rgba(16,24,40,.05)!important;
+}
+html.mce-refined-ui .course-content .section .content,
+html.mce-refined-ui .course-content .section .section-item .section-item,
+html.mce-refined-ui .course-content .section .activity .card,
+html.mce-refined-ui .course-content .section .activity .card-body {
+ background:transparent!important; border:0!important; box-shadow:none!important;
+}
+html.mce-refined-ui .course-content .sectionname {font-size:20px; line-height:1.5; font-weight:650;}
+html.mce-refined-ui .activity-item {border:0!important; border-bottom:1px solid var(--mce-line)!important; border-radius:0!important; padding:16px 8px!important; margin:0; background:transparent!important; box-shadow:none!important;}
+html.mce-refined-ui .activity-item:hover {background:rgba(37,99,235,.05)!important;}
+html.mce-refined-ui .activity:last-child .activity-item {border-bottom:0!important;}
+html.mce-refined-ui .activityname a {font-weight:600; color:var(--mce-link); line-height:1.6;}
+html.mce-refined-ui .activity-dates, html.mce-refined-ui .activity-information {color:var(--mce-muted); font-size:15px;}
+html.mce-refined-ui .block .card-title {font-size:18px; font-weight:650;}
+html.mce-refined-ui .block {border:1px solid var(--mce-line)!important; border-radius:10px!important; box-shadow:0 2px 8px rgba(16,24,40,.06)!important;}
+html.mce-refined-ui .block .card-body {padding:20px;}
+html.mce-refined-ui .dashboard-card {border:1px solid var(--mce-line)!important; border-radius:10px!important; overflow:hidden; box-shadow:0 2px 8px rgba(16,24,40,.06)!important;}
+html.mce-refined-ui .dashboard-card .coursename {font-size:17px; font-weight:650; line-height:1.5;}
+html.mce-refined-ui .dashboard-card .dashboard-card-img {height:140px;}
+html.mce-refined-ui .list-group-item {border-color:var(--mce-line); padding:14px 16px;}
+html.mce-refined-ui .drawer {border-color:var(--mce-line);}
+html.mce-refined-ui .drawer .drawerheader {padding:12px 16px;}
+html.mce-refined-ui .drawer .list-group-item {font-size:15px; line-height:1.6;}
+html.mce-refined-ui .message-app .card-header {border-color:var(--mce-line);}
+html.mce-refined-ui #region-main :is(a,button,input,select):focus-visible {outline:2px solid var(--mce-link)!important; outline-offset:3px;}
+html.mce-refined-ui #region-main input:not([type="checkbox"]):not([type="radio"]),
+html.mce-refined-ui #region-main select {border-radius:6px; min-height:40px;}
+html.mce-refined-ui .deadline-highlight {color:var(--mce-ink);}
+@media(min-width:992px) {html.mce-refined-ui #page.drawers {padding-left:24px; padding-right:24px;}}
+@media(prefers-reduced-motion:reduce) {html.mce-refined-ui .activity-item {transition:none!important;}}

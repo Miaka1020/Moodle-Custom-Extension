@@ -1,46 +1,50 @@
 {
-    "manifest_version": 3,
-    "name": "Custom-POLITE(moodle)",
-    "version": "6.0",
-    "description": "北海道情報大学のPOLITEに機能を追加",
-    "icons": {
-        "16": "icon16.png",
-        "48": "icon48.png",
-        "128": "icon128.png"
+  "manifest_version": 3,
+  "name": "Custom-POLITE(moodle)",
+  "version": "6.0",
+  "description": "北海道情報大学のPOLITEに機能を追加",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png"
     },
-
-    "action": {
-        "default_icon": {
-            "16": "icon16.png",
-            "48": "icon48.png"
-        },
-        "default_title": "Custom-POLITE(moodle)"
-    },
-
-"content_scripts": [
+    "default_title": "Custom-POLITE(moodle)"
+  },
+  "background": {
+    "service_worker": "update-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
     {
       "matches": ["https://polite.do-johodai.ac.jp/*"],
-      "css": ["moodle-custom-styles.css"],
+      "css": ["moodle-custom-styles.css", "ui-design.css", "refined-ui.css", "early-theme.css", "course-checklist.css", "workspace-ui.css"],
+      "js": ["early-theme.js", "content.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://polite.do-johodai.ac.jp/*"],
+      "js": ["darkreader.js", "dr_init_bridge.js"],
       "run_at": "document_start",
-      "js": ["content.js"] 
-    },
-    {
-      "matches": ["https://polite.do-johodai.ac.jp/*"],
-      "js": ["content.js"],
-      "run_at": "document_idle" 
+      "world": "MAIN"
     }
-],
-
-    "permissions": [
-        "storage"
-    ],
-    "host_permissions": [
-        "https://polite.do-johodai.ac.jp/*"
-    ],
-   "web_accessible_resources": [
+  ],
+  "permissions": [
+    "tabs",
+    "storage",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "https://polite.do-johodai.ac.jp/*"
+  ],
+  "web_accessible_resources": [
     {
-      "resources": ["darkreader.js", "dr_init_bridge.js", "early_dark_fixup.css"], 
+      "resources": ["darkreader.js", "dr_init_bridge.js", "early_dark_fixup.css"],
       "matches": ["<all_urls>"]
     }
-    ]
+  ]
 }

@@ -1,0 +1,63 @@
+/* Real page surfaces, not an overlay. Keep content and controls visible. */
+html.mce-dark-pending {color-scheme:dark!important; background:#181a1b!important; color:#e8e6e3!important;}
+html.mce-dark-pending body,
+html.mce-dark-pending body #page,
+html.mce-dark-pending body #page-wrapper {background-color:#181a1b!important; color:#e8e6e3!important;}
+html.mce-dark-pending body :is(.main-inner,.card,.card-body,.block,.dropdown-menu,.dropdown-item,.drawer,.drawercontent,.list-group-item,.modal-content,.form-control,.bg-white),
+html.mce-dark-pending body nav.navbar {background-color:#20252c!important; color:#e8e6e3!important; border-color:#444c57!important;}
+html.mce-dark-pending body :is(h1,h2,h3,h4,h5,h6,label,.navbar-brand,.navbar-nav .nav-link) {color:#e8e6e3!important;}
+/* Moodle renders these skeletons before AJAX course/timeline data arrives. */
+html.mce-dark-pending body .bg-pulse-grey,
+html[data-darkreader-scheme="dark"] body .bg-pulse-grey {
+ background:#303946!important; background-image:none!important; animation:none!important;
+}
+html.mce-dark-pending body .bg-pulse-grey::before,
+html.mce-dark-pending body .bg-pulse-grey::after,
+html[data-darkreader-scheme="dark"] body .bg-pulse-grey::before,
+html[data-darkreader-scheme="dark"] body .bg-pulse-grey::after {
+ background:transparent!important; background-image:none!important; animation:none!important;
+}
+/* Moodle section containers are not .card; they can arrive before Dark Reader's
+   dynamic overrides. Cover these surfaces during initial parsing as well. */
+html.mce-dark-pending body .course-content .section,
+html.mce-dark-pending body .course-content .section-item,
+html.mce-dark-pending body .course-content .activity-item,
+html.mce-dark-pending body .course-content .activity-description,
+html.mce-dark-pending body .course-content .description,
+html.mce-dark-pending body .course-content .no-overflow {
+ background-color:#20252c!important; color:#e8e6e3!important; border-color:#465163!important;
+}
+/* Keep a dark canvas throughout the handoff, without covering any content. */
+html.mce-dark-active {color-scheme:dark!important; background-color:#181a1b!important;}
+html.mce-dark-active body {background-color:#181a1b!important;}
+html.mce-dark-active .course-content .section-item {
+ background-color:rgba(24,26,27,var(--mce-content-opacity,.7))!important;
+ color:#e8e6e3!important;
+}
+/* Cached layout and content surfaces apply as Moodle's DOM is parsed. */
+html.mce-ui-cached {--mce-canvas-rgb:255,255,255;}
+html.mce-ui-cached.mce-dark-active {--mce-canvas-rgb:24,26,27;}
+html.mce-ui-cached body #page.drawers .main-inner {
+ background-color:rgba(var(--mce-canvas-rgb),var(--mce-content-opacity,.7))!important;
+}
+html.mce-ui-cached:not(.mce-dark-active) body nav.navbar {background-color:var(--mce-header-bg,#fff)!important;}
+html.mce-ui-cached:not(.mce-dark-active) body :is(.navbar-brand,.navbar-nav .nav-link,#customSettingsBtn) {color:var(--mce-header-text,#000)!important;}
+@media(min-width:992px) {
+ html.mce-layout-expanded[data-mce-page="courses"] body #page.drawers .main-inner,
+ html.mce-layout-expanded[data-mce-page="courses"] body .header-maxwidth {max-width:1600px!important;width:calc(100% - 48px)!important;margin-inline:auto!important;}
+ html.mce-layout-expanded[data-mce-page="dashboard"] body.limitedwidth #page.drawers .main-inner,
+ html.mce-layout-expanded[data-mce-page="dashboard"] body .header-maxwidth {max-width:98%!important;width:98%!important;margin-inline:auto!important;}
+ html.mce-layout-expanded .block_myoverview .card-grid {display:grid!important;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))!important;gap:12px!important;margin:0!important;}
+ html.mce-layout-expanded .block_myoverview .card-grid > .col {max-width:none!important;width:auto!important;min-width:0!important;margin:0!important;padding-inline:0!important;}
+ html:root.mce-layout-expanded .block_myoverview .dashboard-card .dashboard-card-img {height:96px!important;}
+ html:root.mce-layout-expanded .block_myoverview .dashboard-card .coursename {font-size:15px!important;line-height:1.5!important;}
+ html:root.mce-layout-expanded .block_myoverview .dashboard-card .card-body {padding:12px!important;}
+}
+@media(min-width:1200px) {
+ html.mce-layout-expanded[data-mce-page="dashboard"] #block-region-content {display:grid!important;grid-template-columns:1fr 1fr!important;gap:20px!important;align-items:start!important;}
+ html.mce-layout-expanded[data-mce-page="dashboard"] #block-region-content > :is(.block_site_announcements,.block_news_items,.block_myoverview,.block_recentlyaccesseditems,.block_recentlyaccessedcourses) {grid-column:1 / -1!important;}
+ html.mce-layout-expanded[data-mce-page="dashboard"] #customTimetableWidget {grid-column:1 / 2!important;order:2!important;}
+ html.mce-layout-expanded[data-mce-page="dashboard"] .block_timeline {grid-column:2 / 3!important;order:3!important;}
+ html.mce-layout-expanded[data-mce-page="dashboard"] #block-region-content > :is(.block_site_announcements,.block_news_items) {order:1!important;}
+ html.mce-layout-expanded[data-mce-page="dashboard"] #block-region-content > :is(.block_myoverview,.block_recentlyaccesseditems,.block_recentlyaccessedcourses) {order:4!important;}
+}

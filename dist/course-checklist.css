@@ -1,0 +1,77 @@
+#mce-course-checklist {--mce-checklist-rgb:255,255,255; box-sizing:border-box; background:rgba(var(--mce-checklist-rgb),var(--mce-content-opacity,.7)); color:var(--mce-text,#192635); border:1px solid var(--mce-border,#d9e0e7); border-radius:10px; box-shadow:0 2px 8px rgba(16,24,40,.08); margin:0 0 24px; font:15px/1.6 system-ui,-apple-system,"Yu Gothic",sans-serif; overscroll-behavior:contain;}
+#mce-course-checklist * {box-sizing:border-box;}
+#mce-course-checklist[data-placement="gutter"] {position:fixed; top:84px; left:var(--mce-checklist-left); width:var(--mce-checklist-width); max-height:calc(100dvh - 108px); overflow:hidden; z-index:20; display:flex; flex-direction:column;}
+#mce-course-checklist .mce-checklist-header {display:flex; align-items:center; justify-content:space-between; padding:12px 16px; gap:8px; border-bottom:1px solid var(--mce-border);}
+#mce-course-checklist h2 {font-size:16px; font-weight:650; margin:0; color:inherit;}
+#mce-course-checklist button {font:inherit; color:inherit; background:transparent; border:1px solid var(--mce-border); border-radius:6px; cursor:pointer; min-height:44px; min-width:44px;}
+#mce-course-checklist .mce-checklist-body {padding:0 16px 12px; min-height:0; display:flex; flex-direction:column;}
+#mce-course-checklist [hidden] {display:none!important;}
+#mce-course-checklist .mce-checklist-note {font-size:15px; color:var(--mce-secondary); margin:0;}
+#mce-course-checklist .mce-checklist-counts {font-size:15px; color:var(--mce-secondary); margin:0; padding:0 0 12px;}
+#mce-course-checklist .mce-checklist-toolbar {display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 0; flex-shrink:0;}
+#mce-course-checklist .mce-checklist-list {list-style:none; margin:0; padding:0 4px; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; min-height:0; max-height:65dvh; touch-action:pan-y;}
+#mce-course-checklist[data-placement="gutter"] .mce-checklist-list {max-height:none;}
+#mce-course-checklist .mce-checklist-task {border:0; border-bottom:1px solid var(--mce-border); border-radius:0; padding:16px 4px; margin:0;}
+#mce-course-checklist .mce-checklist-task:last-child {border-bottom:0;}
+#mce-course-checklist .mce-checklist-link {display:block; color:#245fce; text-decoration:none; overflow-wrap:anywhere; font-weight:600; margin-bottom:10px;}
+#mce-course-checklist .mce-checklist-link:hover {text-decoration:underline;}
+#mce-course-checklist .mce-checklist-select {font:inherit; width:100%; min-height:44px; border:1px solid var(--mce-border); border-radius:6px; padding:6px 8px; color:var(--mce-text); background:rgba(244,247,250,var(--mce-content-opacity,.7)); cursor:pointer;}
+#mce-course-checklist .mce-checklist-select option {background:var(--mce-surface);color:var(--mce-text);}
+#mce-course-checklist .mce-checklist-task[data-state="submitted"] .mce-checklist-select {color:#147d4a;}
+#mce-course-checklist :focus-visible {outline:2px solid var(--mce-action,#2563eb); outline-offset:3px;}
+#mce-course-checklist .mce-checklist-status {font-size:15px; color:var(--mce-secondary); margin:8px 0 0; flex-shrink:0;}
+#mce-course-checklist .mce-checklist-status:empty {display:none;}
+#mce-course-checklist .mce-checklist-empty {color:var(--mce-secondary); margin:0;}
+#mce-course-checklist select:disabled {cursor:default; opacity:1;}
+#mce-course-checklist select[data-busy="true"] {cursor:wait;}
+html.mce-dark-active body #mce-course-checklist {--mce-checklist-rgb:32,40,50; background:rgba(var(--mce-checklist-rgb),var(--mce-content-opacity,.7))!important; color:#edf2f7!important; border-color:#4b5b6e!important;}
+html.mce-dark-active body #mce-course-checklist .mce-checklist-link {color:#9cbeff!important;}
+html.mce-dark-active body #mce-course-checklist .mce-checklist-select {background:rgba(43,54,67,var(--mce-content-opacity,.7))!important; color:#edf2f7!important; border-color:#526478!important;}
+html.mce-dark-active body #mce-course-checklist .mce-checklist-task[data-state="doing"] {border-left-color:#9cbeff!important;}
+html.mce-dark-active body #mce-course-checklist .mce-checklist-task[data-state="submitted"] {border-left-color:#80dfb1!important;}
+html.mce-dark-active body #mce-course-checklist .mce-checklist-task[data-state="submitted"] .mce-checklist-select {color:#80dfb1!important;}
+#mce-course-checklist .mce-checklist-refresh {padding:6px 10px; font-size:15px; flex-shrink:0;}
+#mce-course-checklist .mce-checklist-evidence {font-size:15px; line-height:1.5; margin:8px 0 0; color:var(--mce-secondary);}
+#mce-course-checklist .mce-checklist-evidence[data-status="submitted"] {color:var(--mce-success,#147d4a);}
+#mce-course-checklist .mce-checklist-evidence:is([data-status="error"],[data-status="draft"]) {color:var(--mce-warning,#a15c00);}
+#mce-course-checklist .mce-checklist-due {font-size:15px; margin:0 0 12px; color:var(--mce-secondary); font-variant-numeric:tabular-nums;}
+#mce-course-checklist .mce-checklist-due[data-urgency="listed"] {color:var(--mce-action,#2563eb); font-weight:700; background:rgba(37,99,235,.09); padding:6px 8px; border-radius:6px;}
+#mce-course-checklist .mce-checklist-due[data-urgency="soon"] {color:var(--mce-warning,#a15c00); font-weight:700; background:rgba(234,88,12,.08); padding:6px 8px; border-radius:6px;}
+#mce-course-checklist .mce-checklist-due:is([data-urgency="urgent"],[data-urgency="overdue"],[data-urgency="critical"]) {color:var(--mce-danger,#c5221f); font-weight:700; background:rgba(225,29,72,.08); padding:6px 8px; border-radius:6px;}
+#mce-course-checklist .mce-checklist-due:is([data-urgency="critical"],[data-urgency="overdue"])::before {content:'⚠ ';}
+#mce-course-checklist .mce-checklist-task[data-kind="quiz"] .mce-checklist-link::before {content:'クイズ';}
+#mce-course-checklist .mce-checklist-task[data-kind="assign"] .mce-checklist-link::before {content:'課題';}
+#mce-course-checklist .mce-checklist-link::before {display:inline-block; font-size:14px; font-weight:400; color:var(--mce-secondary); margin-right:8px;}
+/* Inbox: one quiet row per activity; only deadlines and status carry color. */
+#mce-course-checklist {container:mce-inbox / inline-size;}
+#mce-course-checklist .mce-checklist-list {padding:0;}
+#mce-course-checklist .mce-checklist-task {display:grid; grid-template-columns:minmax(0,1fr) 112px; gap:4px 8px; align-items:center; padding:12px 0;}
+#mce-course-checklist .mce-checklist-link {grid-column:1 / -1; margin:0; line-height:1.6;}
+#mce-course-checklist .mce-checklist-due {grid-column:1; margin:0; font-size:14px; line-height:1.5; padding:4px 6px; border-radius:4px;}
+#mce-course-checklist .mce-checklist-select {grid-column:2; grid-row:2; width:112px; min-height:44px; border-color:transparent; border-radius:6px; padding:6px; font-size:14px; background:rgba(120,140,160,calc(var(--mce-content-opacity,.7) * .12));}
+#mce-course-checklist .mce-checklist-evidence {grid-column:1 / -1; margin:0; font-size:14px;}
+#mce-course-checklist .mce-checklist-task[data-state="submitted"] .mce-checklist-select {background:rgba(30,150,90,calc(var(--mce-content-opacity,.7) * .12));}
+#mce-course-checklist .mce-checklist-task[data-state="doing"] .mce-checklist-select {color:#245fce; background:rgba(37,99,235,calc(var(--mce-content-opacity,.7) * .12));}
+html:root.mce-dark-active body #mce-course-checklist .mce-checklist-select {border-color:transparent!important; background:rgba(140,170,200,calc(var(--mce-content-opacity,.7) * .12))!important;}
+html:root.mce-dark-active body #mce-course-checklist .mce-checklist-task[data-state="doing"] .mce-checklist-select {color:#9cbeff!important; background:rgba(112,157,255,calc(var(--mce-content-opacity,.7) * .15))!important;}
+@container mce-inbox (min-width:560px) {
+ #mce-course-checklist .mce-checklist-task {grid-template-columns:minmax(180px,1fr) minmax(120px,.6fr) 112px; gap:4px 16px;}
+ #mce-course-checklist .mce-checklist-link {grid-column:1; grid-row:1;}
+ #mce-course-checklist .mce-checklist-due {grid-column:2; grid-row:1 / 3;}
+ #mce-course-checklist .mce-checklist-select {grid-column:3; grid-row:1 / 3;}
+ #mce-course-checklist .mce-checklist-evidence {grid-column:1; grid-row:2;}
+}
+/* Stable name/deadline/status tracks; longer names keep the deadline column put. */
+#mce-course-checklist .mce-checklist-task {grid-template-columns:minmax(0,1fr) 112px; grid-template-rows:minmax(3.2em,auto) minmax(28px,auto) auto; gap:6px 8px;}
+#mce-course-checklist .mce-checklist-link {grid-column:1 / -1; grid-row:1; min-width:0; align-self:start;}
+#mce-course-checklist .mce-checklist-link::before {min-width:3em;}
+#mce-course-checklist .mce-checklist-due {grid-column:1 / -1; grid-row:2; justify-self:start; max-width:100%; overflow-wrap:anywhere;}
+#mce-course-checklist .mce-checklist-select {grid-column:2; grid-row:3; align-self:center;}
+#mce-course-checklist .mce-checklist-evidence {grid-column:1; grid-row:3; min-width:0; overflow-wrap:anywhere;}
+@container mce-inbox (min-width:560px) {
+ #mce-course-checklist .mce-checklist-task {grid-template-columns:minmax(0,1fr) 160px 112px; grid-template-rows:minmax(3.2em,auto) auto; column-gap:16px;}
+ #mce-course-checklist .mce-checklist-link {grid-column:1; grid-row:1;}
+ #mce-course-checklist .mce-checklist-due {grid-column:2; grid-row:1 / 3; align-self:center;}
+ #mce-course-checklist .mce-checklist-select {grid-column:3; grid-row:1 / 3;}
+ #mce-course-checklist .mce-checklist-evidence {grid-column:1; grid-row:2;}
+}

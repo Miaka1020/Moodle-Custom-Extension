@@ -1,0 +1,182 @@
+/* Planner and reading layout: no extra page-level stacking context. */
+html[data-mce-content-align="left"] body #page.drawers .main-inner {margin-left:24px!important; margin-right:auto!important;}
+html[data-mce-content-align="right"] body #page.drawers .main-inner {margin-left:auto!important; margin-right:24px!important;}
+html[data-mce-content-align="center"] body #page.drawers .main-inner {margin-left:auto!important; margin-right:auto!important;}
+@media(max-width:900px) {
+ html[data-mce-content-align] body #page.drawers .main-inner {margin-inline:auto!important;}
+}
+.mce-action-feedback {position:fixed; z-index:2147483647; max-width:min(320px,calc(100vw - 16px)); padding:7px 10px; border:1px solid var(--mce-border,#d9e0e7); border-radius:6px; background:var(--mce-surface,#fff); color:var(--mce-text,#192635); box-shadow:0 2px 6px rgba(16,24,40,.1); font:14px/1.5 system-ui,sans-serif; pointer-events:none;}
+.mce-action-feedback[data-error="true"] {color:var(--mce-danger,#b42332);}
+html.mce-dark-active .mce-action-feedback {background:#202832!important; color:#edf2f7!important; border-color:#526478!important;}
+html.mce-dark-active .mce-action-feedback[data-error="true"] {color:#ffa6b7!important;}
+html body :is(#customTimetableTable,.generaltable,.user-grade,.mce-att-metrics,.mce-checklist-due,.mce-deadline-badge,.deadline-date,#att-history-list) {font-variant-numeric:tabular-nums lining-nums;}
+html body td.mce-number-cell {text-align:right!important; white-space:nowrap; font-variant-numeric:tabular-nums lining-nums;}
+/* Moodle's stretched-link::after covers the activity at z-index:1. */
+html body .course-content .mce-add-reference {position:relative; z-index:2; display:inline-flex; align-items:center; vertical-align:middle; min-height:36px; margin:4px 0 4px 8px; padding:5px 8px; border:1px solid var(--mce-border,#d9e0e7); border-radius:5px; background:transparent; color:var(--mce-secondary,#536477); font:14px/1.5 system-ui,sans-serif; cursor:pointer;}
+html body .course-content .mce-add-reference:hover {color:var(--mce-action,#245fce); border-color:currentColor;}
+html body .course-content .mce-add-reference:focus-visible {outline:2px solid var(--mce-action,#245fce); outline-offset:2px;}
+html.mce-dark-active body .course-content .mce-add-reference {color:#bdc9d8!important; border-color:#526478!important;}
+/* The document and reference pane share the desktop viewport. ResizeObserver keeps
+   the reserved width in step with the existing drag handle. No transform/filter. */
+@media(min-width:1100px) {
+ html body #moodle-ref-sidebar-container {max-width:48vw!important;}
+ html.mce-reference-docked body #page-wrapper {width:calc(100% - var(--mce-reference-width))!important; min-width:0!important;}
+ html.mce-reference-docked body nav.navbar.fixed-top {width:calc(100% - var(--mce-reference-width))!important; right:auto!important;}
+ html:root.mce-reference-docked body #page.drawers .main-inner {width:auto!important; min-width:0!important; max-width:calc(100% - var(--mce-reference-gutter,16px) - 16px)!important; margin-left:var(--mce-reference-gutter,16px)!important; margin-right:16px!important; padding-inline:20px!important;}
+ html.mce-reference-docked body :is(#region-main,.course-content) {min-width:0!important; max-width:100%;}
+}
+/* A quiet surface behind reading text, leaving the surrounding image visible.
+   At opacity zero this surface also becomes fully transparent. */
+html.mce-has-background {--mce-reading-rgb:255,255,255;}
+html.mce-has-background:is(.mce-dark-active,[data-darkreader-scheme="dark"]) {--mce-reading-rgb:24,26,27;}
+html:root.mce-has-background body :is(
+ .course-content .summarytext > :is(p,h1,h2,h3,h4,ul,ol):not(:has(img,video,iframe,table)),
+ .course-content .activity-description .no-overflow > :is(p,h2,h3,h4,ul,ol):not(:has(img,video,iframe,table)),
+ .course-content .activityname > a,
+ #mce-course-checklist .mce-checklist-link,
+ #mce-course-checklist .mce-checklist-evidence) {
+ background-color:rgba(var(--mce-reading-rgb),calc(var(--mce-content-opacity,.7) * .45))!important;
+ border-radius:3px; box-decoration-break:clone; -webkit-box-decoration-break:clone;
+}
+html.mce-has-background body .course-content :is(.summarytext,.activity-description .no-overflow) > :is(p,h1,h2,h3,h4,ul,ol):not(:has(img,video,iframe,table)) {width:fit-content; max-width:100%;}
+html body i.mce-ui-icon {display:inline-flex!important; align-items:center; justify-content:center; width:20px!important; height:20px!important; flex:0 0 20px; font-style:normal!important; font-size:20px!important; line-height:1!important; vertical-align:-.2em;}
+html body i.mce-ui-icon::before {content:none!important;}
+html body i.mce-ui-icon svg {display:block; width:100%; height:100%; stroke-width:1.75;}
+html body #ref-toggle-btn i.mce-ui-icon {width:24px!important; height:24px!important; flex-basis:24px;}
+html body #att-history-toggle i.mce-ui-icon {width:16px!important; height:16px!important; flex-basis:16px;}
+html body :is(.mce-material-icon,.mce-timeline-colors-button) svg {stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round;}
+html body nav.navbar i.mce-ui-icon {margin-right:0!important; vertical-align:middle;}
+html body nav.navbar :is(.popover-region-toggle,[data-action="toggle-drawer"]) {align-items:center;}
+#mce-extension-info {display:flex; align-items:center; flex-wrap:wrap; gap:8px 16px; padding:12px 0; margin-bottom:8px; border-bottom:1px solid var(--mce-border,#d9e0e7); font-size:15px;}
+#mce-extension-info .mce-extension-version {color:var(--mce-secondary,#536477); font-variant-numeric:tabular-nums;}
+#mce-extension-info > a {margin-left:auto;}
+#mce-extension-info .mce-update-check {font:inherit; font-size:14px; padding:6px 10px; min-height:36px; border:1px solid var(--mce-border,#d9e0e7); border-radius:6px; background:transparent; color:var(--mce-text,#192635); cursor:pointer;}
+#mce-extension-info .mce-update-check:disabled {cursor:wait;}
+#mce-extension-info .mce-update-check:focus-visible {outline:2px solid var(--mce-action,#2563eb); outline-offset:2px;}
+#mce-extension-info :is(.mce-update-installed,.mce-update-check-status) {flex-basis:100%; margin:0; font-size:14px; color:var(--mce-secondary,#536477);}
+#mce-extension-info .mce-update-installed {color:var(--mce-success,#147d4a);}
+#mce-extension-info .mce-update-notice {flex-basis:100%; margin:0; font-weight:700; color:#b42332!important;}
+#mce-extension-info [hidden] {display:none!important;}
+#mce-extension-info[data-update="true"] > a {color:#b42332!important; font-weight:700; text-decoration:underline;}
+html.mce-dark-active #mce-extension-info[data-update="true"] :is(a,.mce-update-notice) {color:#ffa6b7!important;}
+@media(prefers-reduced-motion:no-preference) {
+ html.mce-animations #att-history-toggle .fa-chevron-down {transition:transform 180ms ease-out;}
+}
+/* Actions use the same order and alignment across extension-owned forms. */
+html:root body :is(#custom-settings-modal .modern-modal-footer,.mce-action-footer) {display:flex!important; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:10px; flex-shrink:0;}
+html:root body .mce-action-footer {padding-top:16px; margin-top:20px; border-top:1px solid var(--mce-border,#d9e0e7);}
+html:root body :is(#custom-settings-modal .modern-modal-footer,.mce-action-footer) button {flex:0 0 auto!important; min-width:108px; min-height:44px; padding:8px 16px!important; margin:0!important; font-size:15px;}
+html:root body :is(#closeTimetableModal,#att-cancel-cfg) {background:transparent!important; color:var(--mce-text)!important; border:1px solid var(--mce-border)!important;}
+html:root body :is(#editTimetableBtn,#att-settings-btn,.mce-timeline-colors-button) {min-height:44px!important; min-width:44px; flex-shrink:0; border-radius:6px;}
+html:root body #editTimetableBtn {font-size:15px!important; padding:8px 14px!important; background:transparent!important; color:var(--mce-text)!important; border:1px solid var(--mce-border)!important;}
+html:root body .block_timeline :is(h2,h3,h4,h5):has(.mce-timeline-colors-button) {display:flex; align-items:center; justify-content:space-between; gap:8px;}
+html:root body .mce-timeline-colors-button {margin-inline-start:auto;}
+html:root body :is(#exportTimetableBtn,#importTimetableBtn) {min-height:44px; background:transparent!important; color:var(--mce-text)!important; border:1px solid var(--mce-border)!important;}
+/* Equal icon columns, with the native completion/editing controls left intact. */
+html:root.mce-refined-ui body .course-content .mce-material-row :is(.activityiconcontainer,img.activityicon) {display:none!important;}
+html:root.mce-refined-ui body .course-content .mce-material-row .activityinstance {padding-left:0!important; min-width:0;}
+html:root.mce-refined-ui body .course-content .mce-material-link {display:inline-flex!important; align-items:flex-start; gap:12px; max-width:100%; min-width:0; line-height:1.6; padding-block:4px; vertical-align:top;}
+.mce-material-icon {display:none;}
+html.mce-refined-ui .mce-material-icon {display:inline-flex; flex:0 0 24px; width:24px; height:24px; margin-top:1px; color:#245fce;}
+.mce-material-icon svg {display:block; width:24px; height:24px;}
+.mce-material-icon[data-kind="pdf"] {color:#137c91;}
+.mce-material-icon[data-kind="quiz"] {color:#7750a8;}
+.mce-material-icon:is([data-kind="folder"],[data-kind="file"],[data-kind="page"],[data-kind="book"]) {color:var(--mce-secondary,#536477);}
+html.mce-dark-active .mce-material-icon {color:#9cbeff;}
+html.mce-dark-active .mce-material-icon[data-kind="pdf"] {color:#79d2e6;}
+html.mce-dark-active .mce-material-icon[data-kind="quiz"] {color:#ceb4ff;}
+html:root body #mce-course-checklist .mce-checklist-task[data-state="submitted"] :is(.mce-checklist-link,.mce-checklist-select,.mce-checklist-evidence,.mce-checklist-due),
+html:root.mce-refined-ui body .course-content .mce-material-row[data-mce-material-complete="true"] .mce-material-link {color:#536477!important; font-weight:400!important;}
+html:root body #mce-course-checklist .mce-checklist-task[data-state="submitted"] :is(.mce-checklist-select,.mce-checklist-due) {background:transparent!important; border-color:transparent!important;}
+html:root.mce-refined-ui body .course-content .mce-material-row[data-mce-material-complete="true"] .mce-material-icon {color:inherit!important;}
+html:root.mce-dark-active body #mce-course-checklist .mce-checklist-task[data-state="submitted"] :is(.mce-checklist-link,.mce-checklist-select,.mce-checklist-evidence,.mce-checklist-due),
+html:root.mce-dark-active.mce-refined-ui body .course-content .mce-material-row[data-mce-material-complete="true"] .mce-material-link {color:#bdc9d8!important;}
+/* Course header: keep controls accessible while shortening the route to the content. */
+html:root body[id^="page-course-view-"] #page-header {padding-top:8px!important; padding-bottom:8px!important; margin-bottom:4px!important;}
+html:root body[id^="page-course-view-"] #page-header .page-header-headings {padding-block:0!important; margin-block:0!important;}
+html:root body[id^="page-course-view-"] #page-header h1 {font-size:24px!important; line-height:1.4!important; margin-block:0!important;}
+html:root body[id^="page-course-view-"] .secondary-navigation {margin-bottom:12px!important; padding-block:0!important; min-height:0!important;}
+html:root body[id^="page-course-view-"] .secondary-navigation .moremenu {min-height:44px!important; height:auto!important;}
+html:root body[id^="page-course-view-"] .secondary-navigation .nav-link {min-height:44px; padding:8px 14px!important; line-height:1.6; font-size:15px;}
+html:root body[id^="page-course-view-"] #page.drawers .main-inner {margin-top:16px!important; padding-top:16px!important;}
+#custom-settings-modal .mce-settings-value {display:inline-block; float:right; max-width:62%; margin-left:12px; color:var(--mce-secondary,#5b6470); font-size:14px; font-weight:400; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle;}
+#custom-settings-modal .mce-settings-swatch {display:inline-block; width:14px; height:14px; margin-left:6px; border:1px solid rgba(120,130,145,.5); border-radius:3px; vertical-align:middle;}
+html.mce-dark-active #custom-settings-modal .mce-settings-value {color:#bdc9d8!important;}
+html:root body #moodle-custom-attendance-widget .mce-att-header {margin-bottom:16px!important; gap:12px;}
+html:root body #moodle-custom-attendance-widget .mce-att-header > div:first-child {flex-wrap:wrap; gap:8px 12px!important; min-width:0;}
+html:root body #moodle-custom-attendance-widget .mce-att-header h5 {font-size:16px!important;}
+html:root body #moodle-custom-attendance-widget .mce-att-today {background:transparent!important; border:0!important; border-radius:0!important; padding:0!important; font-size:15px!important; font-weight:600!important; color:var(--mce-text)!important;}
+html:root body #moodle-custom-attendance-widget .mce-att-today[data-state="none"] {color:var(--mce-secondary)!important; font-weight:400!important;}
+html:root body #moodle-custom-attendance-widget .mce-att-today[data-state="attend"] {color:var(--mce-success)!important;}
+html:root body #moodle-custom-attendance-widget .mce-att-today[data-state="late"] {color:var(--mce-warning)!important;}
+html:root body #moodle-custom-attendance-widget .mce-att-today:is([data-state="absent"],[data-state="failed"]) {color:var(--mce-danger)!important;}
+html:root body #moodle-custom-attendance-widget #att-settings-btn {min-width:44px; min-height:44px; flex-shrink:0; color:var(--mce-secondary)!important;}
+html:root body #moodle-custom-attendance-widget .mce-att-metrics {grid-template-columns:repeat(3,minmax(0,1fr)) minmax(120px,1.4fr)!important;}
+html:root body #moodle-custom-attendance-widget .mce-att-metrics > div:not(.mce-att-remaining) > div:nth-child(2) {font-size:22px!important; font-weight:500!important; color:var(--mce-text)!important;}
+html:root body #moodle-custom-attendance-widget .mce-att-remaining > div:first-child {font-size:14px!important; font-weight:600!important; color:var(--mce-text)!important; margin-bottom:6px!important;}
+html:root body #moodle-custom-attendance-widget .mce-att-remaining > div:nth-child(2) {font-size:40px!important; font-weight:650!important; line-height:1.15!important;}
+html:root body #moodle-custom-attendance-widget .mce-att-remaining .mce-att-unit {font-size:14px; margin-left:4px; font-weight:400; color:var(--mce-secondary)!important;}
+html:root body #moodle-custom-attendance-widget .mce-att-remaining > div:last-child {font-size:12px!important; color:var(--mce-secondary)!important; opacity:1!important; margin-top:4px;}
+html:root body #moodle-custom-attendance-widget #att-history-toggle {min-height:36px; font-size:14px!important; color:var(--mce-secondary)!important;}
+@media(max-width:600px) {
+ html:root body #moodle-custom-attendance-widget .mce-att-metrics {grid-template-columns:repeat(2,minmax(0,1fr))!important;}
+ #custom-settings-modal .mce-settings-value {max-width:55%; font-size:13px;}
+}
+html:root body #customTimetableWidget #customTimetableTable {border:0!important; border-spacing:0!important; overflow:visible!important;}
+html:root body #customTimetableWidget #customTimetableTable thead th {background:transparent!important; border:0!important; border-bottom:1px solid var(--mce-border,#d9e0e7)!important; color:var(--mce-text,#192635)!important; padding:8px 4px 12px!important; font-size:15px;}
+html:root body #customTimetableWidget #customTimetableTable thead th:first-child {width:76px!important;}
+.mce-planner-day-dot {display:block; width:5px; height:5px; margin:5px auto -5px; border-radius:50%; background:transparent;}
+[data-today="true"] > .mce-planner-day-dot {background:var(--mce-action,#245fce);}
+html:root body #customTimetableWidget #customTimetableTable td {border:0!important; border-bottom:1px solid var(--mce-border,#d9e0e7)!important; background:transparent!important; height:64px; padding:10px 6px!important; vertical-align:middle!important;}
+html:root body #customTimetableWidget #customTimetableTable td:first-child {vertical-align:middle!important; text-align:center!important; font-size:15px!important; font-weight:600;}
+html:root body #customTimetableWidget #customTimetableTable .mce-period-time {white-space:normal; font-size:11px;}
+html:root body #customTimetableWidget #customTimetableTable .timetable-empty-cell {font-size:0!important; color:transparent!important;}
+.mce-planner-lesson {--mce-lesson-rgb:37,99,235; --mce-lesson-ink:#245fce; min-height:0; padding:0; border-radius:0; background:transparent; border:0;}
+.mce-planner-lesson[data-tone="1"] {--mce-lesson-rgb:20,130,100; --mce-lesson-ink:#137755;}
+.mce-planner-lesson[data-tone="2"] {--mce-lesson-rgb:120,80,180; --mce-lesson-ink:#7750a8;}
+.mce-planner-lesson[data-tone="3"] {--mce-lesson-rgb:170,80,105; --mce-lesson-ink:#a04462;}
+html:root body #customTimetableWidget #customTimetableTable .mce-planner-course {display:-webkit-box!important; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; white-space:normal!important; overflow-wrap:normal; word-break:normal; line-break:strict; padding:0!important; margin:0; line-height:1.6; font-weight:500!important; font-size:15px!important; color:var(--mce-text,#192635)!important; text-decoration:none;}
+.mce-planner-course::before {content:''; display:inline-block; width:5px; height:5px; border-radius:50%; margin:0 5px 2px 0; background:var(--mce-lesson-ink);}
+html:root body #customTimetableWidget #customTimetableTable .mce-planner-course:hover {text-decoration:underline;}
+.mce-planner-now {display:inline-block; margin-top:6px; font-size:12px; font-weight:650; color:var(--mce-lesson-ink);}
+.mce-planner-now::before {content:'●'; margin-right:4px; font-size:8px; vertical-align:middle;}
+html:root body #customTimetableWidget #customTimetableTable [data-current="true"] .mce-planner-course {font-weight:700!important;}
+html:root body #customTimetableWidget .mce-planner-lesson .timetable-deadline-card {border:0!important; border-top:1px solid rgba(var(--mce-lesson-rgb),.2)!important; background:transparent!important; box-shadow:none!important; border-radius:0; padding:6px 0!important; margin-top:8px;}
+html.mce-dark-active .mce-planner-lesson {--mce-lesson-ink:#a9c6ff;}
+html.mce-dark-active .mce-planner-lesson[data-tone="1"] {--mce-lesson-ink:#80dfb1;}
+html.mce-dark-active .mce-planner-lesson[data-tone="2"] {--mce-lesson-ink:#ceb4ff;}
+html.mce-dark-active .mce-planner-lesson[data-tone="3"] {--mce-lesson-ink:#ffb2c7;}
+#mce-course-outline {position:relative; top:auto; z-index:auto; clear:both; margin:0 0 24px; padding:8px 0 12px; border:0; border-block:1px solid var(--mce-border,#d9e0e7); border-radius:0; background:transparent; color:var(--mce-text,#192635); font:15px/1.6 system-ui,sans-serif;}
+#mce-course-outline * {box-sizing:border-box;}
+#mce-course-outline[hidden] {display:none!important;}
+#mce-course-outline summary {cursor:pointer; min-height:32px; padding:4px 0; font-weight:650;}
+#mce-course-outline .mce-outline-current {font-weight:400; margin-left:16px; color:var(--mce-secondary,#536477);}
+#mce-course-outline ol {display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr)); gap:4px 12px; list-style:none; margin:8px 0 0; padding:0; overflow:visible;}
+#mce-course-outline li {display:block; position:static; float:none; min-width:0; width:auto; padding:0; margin:0; list-style:none;}
+#mce-course-outline a {display:block; position:static; white-space:normal; overflow-wrap:anywhere; padding:8px; min-height:44px; border-radius:4px; color:inherit; text-decoration:none; border:0; font-size:15px; line-height:1.6;}
+#mce-course-outline a:hover {background:rgba(120,140,160,.1);}
+#mce-course-outline a[aria-current] {color:var(--mce-action,#245fce); font-weight:650; background:rgba(120,140,160,.08);}
+#mce-course-outline :focus-visible {outline:2px solid var(--mce-action,#245fce); outline-offset:-2px;}
+body:has(#mce-course-outline) .course-content :is(.section,.course-section) {scroll-margin-top:90px;}
+html.mce-dark-active #mce-course-outline {--mce-outline-rgb:32,40,50; color:#edf2f7!important; border-color:#526478!important;}
+html.mce-dark-active #mce-course-outline .mce-outline-current {color:#bdc9d8!important;}
+html.mce-dark-active #mce-course-outline a[aria-current] {color:#9cbeff!important;}
+html:root body #custom-settings-modal .modern-modal-content {width:min(640px,calc(100vw - 32px))!important; max-width:640px!important; max-height:calc(100dvh - 32px)!important;}
+#custom-settings-modal .modern-modal-body {display:block; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:16px 24px;}
+@media(max-width:700px) {
+ #mce-course-outline .mce-outline-current {display:none;}
+}
+/* Deadline emphasis belongs to the remaining-time text, not a colored container. */
+html:root body .block_timeline [data-mce-deadline].deadline-highlight {
+ background:transparent!important; border:0!important; border-bottom:1px solid var(--mce-border,#d9e0e7)!important;
+ border-radius:0!important; box-shadow:none!important; margin-block:0!important; padding:16px 4px!important;
+}
+html:root body .block_timeline [data-mce-deadline] .mce-deadline-badge {
+ display:table; color:var(--mce-due-ink)!important; background:var(--mce-due-bg)!important; border:0!important; border-radius:4px!important;
+ padding:4px 8px!important; margin:0 0 6px; font-size:15px; line-height:1.5; font-weight:700;
+}
+html:root body .block_timeline [data-mce-deadline] .border-bottom {border-bottom:0!important;}
+@media(prefers-reduced-motion:no-preference) {
+ html.mce-animations .mce-planner-lesson {transition:background-color 160ms ease-out,translate 160ms ease-out;}
+ html.mce-animations .mce-planner-lesson:has(a:hover) {translate:0 -2px;}
+}
